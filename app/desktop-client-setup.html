@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+ <title>GAON ERP 연결</title>
+ <link rel="stylesheet" href="./desktop-client-setup.css">
+</head>
+<body>
+ <main>
+  <div class="mark" aria-hidden="true">G</div>
+  <p class="eyebrow">GAON ERP FOR WINDOWS</p>
+  <h1>GAON 직원 계정으로 시작하세요</h1>
+  <p class="lead">등록된 Google 계정으로 로그인하면 담당 건물과 연결된 업무를 확인할 수 있습니다. 기본 가온 서버는 미리 설정되어 있습니다.</p>
+  <details id="connection-details"><summary>연결 주소 확인·변경</summary><section class="card" aria-labelledby="server-title">
+   <div class="step">1</div><div>
+    <h2 id="server-title">서버 주소</h2>
+    <form id="server-form">
+     <label for="server">HTTPS 주소</label>
+     <div class="row"><input id="server" name="server" type="url" inputmode="url" autocomplete="url" placeholder="https://erp.example.com" required><button type="submit">연결 확인</button></div>
+    </form>
+   </div>
+  </section></details>
+  <section class="card" aria-labelledby="login-title">
+   <div class="step">2</div><div>
+    <h2 id="login-title">직원 로그인</h2>
+    <p>기본 브라우저에서 Google 로그인을 완료하면 GAON 프로그램으로 돌아옵니다. 로그인 상태는 이 Windows 계정에 안전하게 보관합니다.</p>
+    <button id="login" class="secondary" type="button" disabled>직원 로그인</button>
+    <button id="open-app" class="secondary" type="button" hidden>ERP 열기</button>
+   </div>
+  </section>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+  <div class="links"><button id="manual" class="link" type="button">빠른 사용 안내</button><button id="forget" class="link danger" type="button" hidden>저장한 주소 지우기</button></div>
+ </main>
+ <script type="module" src="./desktop-client-setup.mjs"></script>
+</body>
+</html>

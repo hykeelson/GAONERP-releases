@@ -1,0 +1,131 @@
+name: Windows release build
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned build tools
+        run: npm install --no-audit --no-fund
+      - name: Security policy tests
+        run: npm test
+      - name: Windows first-launch and preload IPC test
+        run: npm run smoke
+      - name: Build x64 installer and ZIP
+        run: npm run build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify packaged files
+        shell: pwsh
+        run: |
+          $archive = 'release/win-unpacked/resources/app.asar'
+          $listed = & npx --no-install asar list $archive
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect ASAR' }
+          $listed = @($listed | ForEach-Object { $_.Replace('\','/') })
+          $package = Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json
+          if (-not $package.version) { throw 'Package version missing' }
+          $allowed = @('/app') + @($package.build.files | ForEach-Object { '/' + $_.Replace('\','/') })
+          foreach ($required in $allowed) {
+            if ($required -notin $listed) { throw "Required packaged file missing: $required" }
+          }
+          # 자동 업데이트 도구(electron-updater)와 그 의존 모듈만 node_modules 로 허용
+          foreach ($file in $listed) {
+            if ($file -notin $allowed -and -not $file.StartsWith('/node_modules')) { throw "Unexpected packaged file: $file" }
+          }
+          if (-not ($listed -contains '/node_modules/electron-updater')) { throw 'electron-updater missing from package' }
+          if (-not (Test-Path -LiteralPath 'release/win-unpacked/resources/app-update.yml')) { throw 'app-update.yml missing' }
+          $feed = Get-Content -LiteralPath 'release/win-unpacked/resources/app-update.yml' -Raw
+          if ($feed -notmatch 'owner: hykeelson' -or $feed -notmatch 'repo: GAONERP-releases') { throw "Unexpected update feed: $feed" }
+          if (-not (Test-Path -LiteralPath 'release/latest.yml')) { throw 'latest.yml missing' }
+          $listed | Set-Content release/packaged-files.txt
+          Get-FileHash release/GAON-ERP-Setup-x64.exe,release/GAON-ERP-Windows-x64.zip,release/latest.yml -Algorithm SHA256 | ConvertTo-Json | Set-Content release/checksums.json
+          $signatures = @('release/win-unpacked/GAON ERP.exe','release/GAON-ERP-Setup-x64.exe') | ForEach-Object {
+            $signature = Get-AuthenticodeSignature -LiteralPath $_
+            if ($signature.Status -ne 'NotSigned') { throw "Unexpected signature state: $($signature.Status)" }
+            @{ file = $_; status = [string]$signature.Status }
+          }
+          $signatures | ConvertTo-Json | Set-Content release/signatures.json
+      - name: Install, inspect and uninstall
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP 'GAON-Installer-Verification'
+          $setup = (Resolve-Path 'release/GAON-ERP-Setup-x64.exe').Path
+          $install = Start-Process -FilePath $setup -ArgumentList '/S',("/D=" + $installDir) -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
+          $exe = Join-Path $installDir 'GAON ERP.exe'
+          $asar = Join-Path $installDir 'resources/app.asar'
+          $pdf = Join-Path $installDir 'resources/GAON-ERP-Quickstart.pdf'
+          foreach ($path in @($exe,$asar,$pdf)) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Installed file missing: $path" }
+          }
+          $package = Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json
+          $expected = ($package.version -replace '-.*$','') + '.0'
+          $version = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
+          if ($version -ne $expected) { throw "Installed product version mismatch: $version (expected $expected)" }
+          if (-not (Test-Path -LiteralPath (Join-Path $installDir 'resources/app-update.yml'))) { throw 'Installed app-update.yml missing' }
+          $client = $null
+          $clientStarted = $false
+          try {
+            $client = Start-Process -FilePath $exe -PassThru
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 500
+              $client.Refresh()
+              if ($client.HasExited) { throw "Installed app exited before showing its window: $($client.ExitCode)" }
+              if ($client.MainWindowHandle -ne 0 -and $client.MainWindowTitle -eq 'GAON ERP') {
+                $clientStarted = $true
+                break
+              }
+            }
+            if (-not $clientStarted) { throw 'Installed app did not show the GAON ERP window within 15 seconds' }
+            Write-Host 'Installed app launch verified: GAON ERP window is visible'
+          }
+          finally {
+            if ($null -ne $client -and -not $client.HasExited) {
+              [void]$client.CloseMainWindow()
+              if (-not $client.WaitForExit(5000)) {
+                Stop-Process -Id $client.Id -Force
+                $client.WaitForExit()
+              }
+            }
+          }
+          $uninstaller = @(Get-ChildItem -LiteralPath $installDir -Filter '*Uninstall*.exe')
+          if ($uninstaller.Count -ne 1) { throw 'Uninstaller missing or ambiguous' }
+          $uninstall = Start-Process -FilePath $uninstaller[0].FullName -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed: $($uninstall.ExitCode)" }
+          for ($i = 0; $i -lt 20 -and (Test-Path -LiteralPath $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path -LiteralPath $exe) { throw 'App remains after uninstall' }
+          $result = @{ installerExit = $install.ExitCode; uninstallerExit = $uninstall.ExitCode; version = $version; installedClient = $true; installedClientLaunched = $clientStarted; installedManual = $true; removedClient = $true; platform = 'Windows x64' }
+          $result | ConvertTo-Json | Tee-Object -FilePath 'release/windows-installer-verification.json'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaon-erp-windows-x64
+          path: |
+            release/GAON-ERP-Setup-x64.exe
+            release/GAON-ERP-Setup-x64.exe.blockmap
+            release/latest.yml
+            release/GAON-ERP-Windows-x64.zip
+            release/packaged-files.txt
+            release/checksums.json
+            release/signatures.json
+            release/windows-installer-verification.json
+          retention-days: 7
+          if-no-files-found: error
+      # 초안 릴리즈: 공개 전에는 사용자 앱이 보지 않는다. 검수 후 「Publish release」를 눌러야 자동 업데이트가 퍼진다.
+      - name: Create draft release with update files
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $package = Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json
+          $tag = 'v' + $package.version
+          $existing = gh release view $tag --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; bump package.json version first" }
+          gh release create $tag --draft --target $env:GITHUB_SHA --title ("GAON ERP " + $package.version + " · Windows") --notes ("Windows x64 설치본. 설치한 앱은 이 릴리즈가 공개되면 자동으로 업데이트됩니다.`n`n- 새 설치: GAON-ERP-Setup-x64.exe`n- 자동 업데이트용: latest.yml, GAON-ERP-Setup-x64.exe.blockmap (지우지 마세요)") release/GAON-ERP-Setup-x64.exe release/GAON-ERP-Setup-x64.exe.blockmap release/latest.yml release/GAON-ERP-Windows-x64.zip docs/GAON-ERP-Quickstart.pdf
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }
