@@ -32,6 +32,9 @@ jobs:
           $package = Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json
           if (-not $package.version) { throw 'Package version missing' }
           $allowed = @('/app') + @($package.build.files | ForEach-Object { '/' + $_.Replace('\','/') })
+          # 허용 파일이 들어 있는 폴더 자체(예: /app/desktop-fonts)도 목록에 나타나므로 함께 허용한다 (2026-10-28)
+          $folders = @($allowed | ForEach-Object { $path = $_; while (($cut = $path.LastIndexOf('/')) -gt 0) { $path = $path.Substring(0, $cut); $path } })
+          $allowed = @($allowed + $folders | Sort-Object -Unique)
           foreach ($required in $allowed) {
             if ($required -notin $listed) { throw "Required packaged file missing: $required" }
           }
