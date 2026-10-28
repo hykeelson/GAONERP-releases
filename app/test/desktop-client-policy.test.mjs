@@ -82,6 +82,8 @@ test('cloud renderer network stays within GAON and local preview assets',async()
  const {cloudRendererNetworkAllowed:allow}=await import('../desktop-client-policy.mjs');const origin='https://gaon-erp-keelson.web.app';
  assert.equal(allow(origin+'/erp/home.html',origin),true);assert.equal(allow('blob:'+origin+'/fixture',origin),true);assert.equal(allow('data:image/png;base64,AA==',origin),true);
  for(const url of ['https://outside.example/?private=fixture','http://gaon-erp-keelson.web.app','https://gaon-erp-keelson.web.app.evil.example','file:///private.txt'])assert.equal(allow(url,origin),false);
+ for(const url of ['https://dapi.kakao.com/v2/maps/sdk.js?autoload=false','https://t1.daumcdn.net/mapjsapi/js/main/4.4.19/kakao.js','https://map2.daumcdn.net/map_2d/2310bng/L3/1/1.png','https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css'])assert.equal(allow(url,origin),true,url);
+ for(const url of ['https://daumcdn.net.evil.example/x','https://evil-daumcdn.net/x','http://map2.daumcdn.net/x','https://cdn.jsdelivr.net/npm/evil','https://kakao.com.evil.example/'])assert.equal(allow(url,origin),false,url);
 });
 test('response byte limit rejects a declared oversized download before reading',async()=>{
  let pulled=false,cancelled=false;const stream=new ReadableStream({pull(){pulled=true;},cancel(){cancelled=true;}},{highWaterMark:0});
