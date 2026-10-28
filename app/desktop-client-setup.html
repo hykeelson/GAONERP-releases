@@ -3,35 +3,34 @@
 <head>
  <meta charset="utf-8">
  <meta name="viewport" content="width=device-width,initial-scale=1">
- <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
- <title>GAON ERP 연결</title>
+ <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+ <title>GAON ERP</title>
  <link rel="stylesheet" href="./desktop-client-setup.css">
 </head>
 <body>
- <main>
-  <div class="mark" aria-hidden="true">G</div>
-  <p class="eyebrow">GAON ERP FOR WINDOWS</p>
-  <h1>GAON 직원 계정으로 시작하세요</h1>
-  <p class="lead">등록된 Google 계정으로 로그인하면 담당 건물과 연결된 업무를 확인할 수 있습니다. 기본 가온 서버는 미리 설정되어 있습니다.</p>
-  <details id="connection-details"><summary>연결 주소 확인·변경</summary><section class="card" aria-labelledby="server-title">
-   <div class="step">1</div><div>
-    <h2 id="server-title">서버 주소</h2>
-    <form id="server-form">
-     <label for="server">HTTPS 주소</label>
-     <div class="row"><input id="server" name="server" type="url" inputmode="url" autocomplete="url" placeholder="https://erp.example.com" required><button type="submit">연결 확인</button></div>
-    </form>
+ <!-- 2026-10-28: 웹 로그인 첫 화면과 같은 모양. 연결할 회사 서버는 앱에 정해져 있어 직원에게 묻지 않는다. -->
+ <main id="gaon-login" class="gaon-login is-motion" aria-labelledby="gaon-login-title">
+  <canvas class="gaon-login-motion" aria-hidden="true"></canvas>
+  <div class="gaon-login-frame">
+   <div class="gaon-login-hero">
+    <div class="gaon-login-brand"><img data-login-focus src="./desktop-gaon-symbol.svg" width="32" height="35" alt=""><span>GAON</span><span class="gaon-login-product">직원 포털</span></div>
+    <p class="gaon-login-tagline">가온주택관리 직원 전용 업무 공간</p>
    </div>
-  </section></details>
-  <section class="card" aria-labelledby="login-title">
-   <div class="step">2</div><div>
-    <h2 id="login-title">직원 로그인</h2>
-    <p>기본 브라우저에서 Google 로그인을 완료하면 GAON 프로그램으로 돌아옵니다. 로그인 상태는 이 Windows 계정에 안전하게 보관합니다.</p>
-    <button id="login" class="secondary" type="button" disabled>직원 로그인</button>
-    <button id="open-app" class="secondary" type="button" hidden>ERP 열기</button>
-   </div>
-  </section>
-  <p id="status" class="status" role="status" aria-live="polite"></p>
-  <div class="links"><button id="manual" class="link" type="button">빠른 사용 안내</button><button id="forget" class="link danger" type="button" hidden>저장한 주소 지우기</button></div>
+   <section class="gaon-login-card">
+    <span class="gaon-login-eyebrow">가온주택관리</span>
+    <h1 id="gaon-login-title">오늘의 업무를<br>시작하세요.</h1>
+    <p class="gaon-login-description">직원 계정으로 로그인하면<br>담당 건물과 연결된 업무를 확인할 수 있습니다.</p>
+    <div class="gaon-login-action">
+     <button id="login" class="gaon-login-button" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.2c0-.7-.1-1.4-.2-2.1H12v4h5.1a4.4 4.4 0 0 1-1.9 2.8v2.3h3.1c1.8-1.7 2.7-4.1 2.7-7Z" fill="#4285f4"/><path d="M12 21c2.5 0 4.5-.8 6.1-2.2L15 16.5c-.8.5-1.8.8-3 .8-2.4 0-4.5-1.6-5.2-3.8H3.6v2.4A9.2 9.2 0 0 0 12 21Z" fill="#34a853"/><path d="M6.8 13.5a5.5 5.5 0 0 1 0-3V8.1H3.6a9.3 9.3 0 0 0 0 7.8Z" fill="#fbbc05"/><path d="M12 6.7c1.4 0 2.6.5 3.6 1.4l2.7-2.7A9 9 0 0 0 3.6 8.1l3.2 2.4C7.5 8.3 9.6 6.7 12 6.7Z" fill="#ea4335"/></svg>Google 직원 계정으로 로그인</button>
+     <button id="open-app" class="gaon-login-button" type="button" hidden>업무 화면 열기</button>
+     <p id="status" role="status" aria-live="polite">회사 서버에 연결하고 있습니다.</p>
+     <button id="retry" class="gaon-login-retry" type="button" hidden>다시 연결</button>
+    </div>
+    <p class="gaon-login-help">로그인하면 기본 브라우저가 열리고, 끝나면 GAON으로 돌아옵니다.<br>계정 등록이나 접근 권한은 가온 관리자에게 문의해 주세요.</p>
+    <div class="gaon-login-links"><button id="manual" class="gaon-login-link" type="button">빠른 사용 안내</button></div>
+   </section>
+   <p class="gaon-login-footer">GAON WORKSPACE <span>직원 전용 업무 공간</span></p>
+  </div>
  </main>
  <script type="module" src="./desktop-client-setup.mjs"></script>
 </body>

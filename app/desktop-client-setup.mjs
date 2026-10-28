@@ -1,15 +1,25 @@
+import {mountLoginMotion} from './desktop-login-motion.mjs';
+// 2026-10-28: 직원은 「Google 직원 계정으로 로그인」만 누른다. 회사 서버 주소는 앱에 정해져 있어 화면에서 묻지 않는다.
+// 연결이 끊겼으면 정해진 회사 서버로 다시 연결한다.
 const $=id=>document.getElementById(id);
-const form=$('server-form'),input=$('server'),login=$('login'),openApp=$('open-app'),forget=$('forget'),status=$('status');
-let busy=false,verifiedOrigin='',verifiedSession=false;
-function message(text,error=false){status.textContent=text||'';status.classList.toggle('error',error);}
-function sameAddress(){return !!verifiedOrigin&&input.value.trim().replace(/\/$/,'')===verifiedOrigin;}
-function lock(value){busy=value;input.disabled=value;form.querySelector('button').disabled=value;forget.disabled=value;login.disabled=value||!sameAddress();openApp.disabled=value||!sameAddress()||!verifiedSession;}
-function setState(state){verifiedOrigin=state.connected?state.serverOrigin:'';verifiedSession=state.signedIn===true;input.value=state.serverOrigin||'';const details=$('connection-details');if(details)details.open=!!state.serverOrigin&&state.serverOrigin!=='https://gaon-erp-keelson.web.app';forget.hidden=!state.serverOrigin;openApp.hidden=!verifiedSession;lock(busy);}
-async function refresh(){const state=await window.gaonDesktop.state();setState(state);if(state.message)message(state.message,!state.connected&&!!state.serverOrigin);}
-form.addEventListener('submit',async event=>{event.preventDefault();if(busy)return;lock(true);message('서버의 안전한 연결을 확인하고 있습니다…');try{const state=await window.gaonDesktop.saveServer(input.value);setState(state);message(state.message);}catch(error){verifiedOrigin='';verifiedSession=false;openApp.hidden=true;message(error.message,true);}finally{lock(false);}});
-login.addEventListener('click',async()=>{if(busy||!sameAddress())return;lock(true);message('기본 브라우저에서 직원 로그인을 완료해 주세요…');try{const result=await window.gaonDesktop.login();message(result.message);}catch(error){message(error.message,true);}finally{lock(false);}});
-openApp.addEventListener('click',async()=>{if(busy||!sameAddress())return;try{await window.gaonDesktop.openApp();}catch(error){message(error.message,true);}});
-forget.addEventListener('click',async()=>{if(busy)return;lock(true);try{await window.gaonDesktop.forgetServer();verifiedOrigin='';verifiedSession=false;input.value='';forget.hidden=true;openApp.hidden=true;message('저장한 서버 주소를 지웠습니다.');}catch(error){message(error.message,true);}finally{lock(false);}});
+const login=$('login'),openApp=$('open-app'),retry=$('retry'),status=$('status');
+let busy=false,connected=false,signedIn=false;
+function message(text,error=false){status.textContent=text||'';status.classList.toggle('is-error',error);}
+function render(){login.disabled=busy||!connected;login.hidden=signedIn;openApp.hidden=!signedIn;openApp.disabled=busy;retry.hidden=busy||connected;}
+function apply(state){connected=!!state.connected;signedIn=state.signedIn===true;render();}
+async function connect(){
+ busy=true;render();message('회사 서버에 연결하고 있습니다.');
+ try{
+  let state=await window.gaonDesktop.state();
+  if(!state.connected)state=await window.gaonDesktop.reconnect();
+  apply(state);
+  message(state.signedIn?'로그인되어 있어요. 업무 화면을 열어 주세요.':state.connected?'등록된 직원 계정으로 로그인해 주세요.':(state.message||'회사 서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.'),!state.connected);
+ }catch(error){connected=false;message(error.message||'회사 서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.',true);}
+ finally{busy=false;render();}
+}
+login.addEventListener('click',async()=>{if(busy||!connected)return;busy=true;render();message('기본 브라우저에서 Google 로그인을 마쳐 주세요.');try{const result=await window.gaonDesktop.login();message(result.message);}catch(error){message(error.message,true);}finally{busy=false;render();}});
+openApp.addEventListener('click',async()=>{if(busy)return;try{await window.gaonDesktop.openApp();}catch(error){message(error.message,true);}});
+retry.addEventListener('click',()=>{if(!busy)connect();});
 $('manual').addEventListener('click',()=>window.gaonDesktop.openManual().catch(error=>message(error.message,true)));
-input.addEventListener('input',()=>lock(busy));
-refresh().catch(()=>message('앱 연결 정보를 읽지 못했습니다.',true));
+mountLoginMotion($('gaon-login'));
+connect();

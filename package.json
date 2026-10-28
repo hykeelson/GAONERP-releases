@@ -1,6 +1,6 @@
 {
   "name": "gaon-erp-windows",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "GAON ERP Windows client",
   "productName": "GAON ERP",
   "author": "GAON ERP",
@@ -46,7 +46,13 @@
       "app/desktop-client-setup.html",
       "app/desktop-client-setup.css",
       "app/desktop-client-setup.mjs",
-      "app/desktop-client-manual.html"
+      "app/desktop-client-manual.html",
+      "app/desktop-fonts/Pretendard-LICENSE.txt",
+      "app/desktop-fonts/Pretendard-Bold.ttf",
+      "app/desktop-fonts/Pretendard-Medium.otf",
+      "app/desktop-fonts/Pretendard-Regular.otf",
+      "app/desktop-gaon-symbol.svg",
+      "app/desktop-login-motion.mjs"
     ],
     "extraResources": [
       {

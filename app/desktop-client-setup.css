@@ -1,1 +1,127 @@
-:root{color-scheme:light;font-family:"Segoe UI",Pretendard,sans-serif;color:#172a3a;background:#eef3f7}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:40px 20px;background:radial-gradient(circle at 50% 0,#fff 0,#f5f8fa 34%,#eaf0f5 100%)}main{width:min(680px,100%)}.mark{width:54px;height:54px;display:grid;place-items:center;border-radius:18px;background:#153a52;color:#fff;font-size:25px;font-weight:800;box-shadow:0 14px 30px #153a5230}.eyebrow{margin:26px 0 8px;color:#557184;font-size:12px;font-weight:800;letter-spacing:.14em}h1{margin:0;font-size:36px;line-height:1.2;letter-spacing:-.035em}.lead{max-width:600px;margin:14px 0 28px;color:#607585;line-height:1.75}.card{display:grid;grid-template-columns:34px 1fr;gap:16px;margin:12px 0;padding:22px;border:1px solid #dce6ec;border-radius:20px;background:#ffffffeb;box-shadow:0 10px 30px #1635480b}.step{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:#e7f0f4;color:#1a526b;font-weight:800}h2{margin:2px 0 12px;font-size:18px}.card p{margin:0 0 14px;color:#667985;font-size:14px;line-height:1.65}label{display:block;margin-bottom:7px;color:#566d7c;font-size:13px;font-weight:700}.row{display:flex;gap:9px}input{min-width:0;flex:1;height:44px;padding:0 13px;border:1px solid #cddae2;border-radius:12px;background:#fff;font:inherit;outline:none}input:focus{border-color:#33789a;box-shadow:0 0 0 3px #33789a20}button{height:44px;padding:0 18px;border:0;border-radius:12px;background:#1d526d;color:#fff;font:inherit;font-weight:750;cursor:pointer}button:hover{background:#17465d}button:disabled{cursor:not-allowed;opacity:.45}.secondary{background:#e6f0f4;color:#174b65}.secondary:hover{background:#d8e8ef}.status{min-height:24px;margin:18px 4px;color:#1d607f;font-size:14px;font-weight:650}.status.error{color:#b34141}.links{display:flex;gap:18px;padding:0 4px}.link{height:auto;padding:0;background:transparent;color:#537083;font-size:13px}.link:hover{background:transparent;text-decoration:underline}.link.danger{color:#a04949}@media(max-width:560px){body{padding:24px 14px;place-items:start center}h1{font-size:30px}.card{grid-template-columns:1fr}.row{display:grid}.row button{width:100%}}
+/* GAON ERP 데스크톱 앱 첫 화면 (2026-10-28). 웹 로그인 첫 화면(app/css/gaon-login.css)과 같은 모양을 쓴다.
+   설치본에는 app/desktop-* 파일만 들어가서 그 규칙을 이 파일로 옮겨 담았다. 바깥 글꼴·이미지는 부르지 않는다(CSP). */
+@font-face{font-family:"Pretendard";font-weight:400;font-display:swap;src:local("Pretendard Regular"),local("Pretendard-Regular"),url("./desktop-fonts/Pretendard-Regular.otf") format("opentype")}
+@font-face{font-family:"Pretendard";font-weight:600;font-display:swap;src:local("Pretendard SemiBold"),local("Pretendard-SemiBold"),url("./desktop-fonts/Pretendard-Medium.otf") format("opentype")}
+@font-face{font-family:"Pretendard";font-weight:700 900;font-display:swap;src:local("Pretendard Bold"),local("Pretendard-Bold"),url("./desktop-fonts/Pretendard-Bold.ttf") format("truetype")}
+:root{color-scheme:dark;font-family:Pretendard,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#03060f}
+/* Portal uses GAON tokens. No business modules are loaded before staff verification. */
+html[data-gaon-auth="locked"] body{min-height:100dvh;overflow:auto!important;background:var(--jk-canvas,#f5f6f8)!important;color:var(--jk-text,#202733)!important}
+html[data-gaon-auth="locked"] body::before,html[data-gaon-auth="locked"] body::after{display:none!important}
+html[data-gaon-auth="locked"] body>:not(#gaon-login):not(#gaon-startup):not(noscript){display:none!important}
+html[data-gaon-auth="ready"] #gaon-login{display:none!important}
+#gaon-login[hidden],#gaon-login [hidden]{display:none!important}
+#gaon-login{box-sizing:border-box;min-height:100dvh;width:100%;padding:48px 24px;display:grid;place-items:center;position:relative;font-family:var(--jk-font-body,"Pretendard Variable",Pretendard,sans-serif);background:var(--jk-canvas,#f5f6f8);color:var(--jk-text,#202733)}
+#gaon-login *{box-sizing:border-box}
+.gaon-login-frame{width:min(100%,448px)}
+.gaon-login-brand{display:flex;align-items:center;gap:8px;margin-bottom:32px}
+.gaon-login-brand>span:first-of-type{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:28px;letter-spacing:-1px}
+.gaon-login-product{font-size:14px;margin-left:auto;color:var(--jk-text-muted,#5f6b7a)}
+.gaon-login-card{padding:40px 32px;background:var(--jk-surface,#fff);border:1px solid var(--jk-border,#e5e8eb);border-radius:16px;box-shadow:var(--jk-shadow-surface)}
+.gaon-login-eyebrow{font-size:14px;font-weight:600;color:var(--jk-text-muted,#5f6b7a)}
+#gaon-login h1{font-family:inherit;color:inherit;font-size:32px;line-height:1.3;letter-spacing:-.6px;font-weight:700;margin:16px 0}
+#gaon-login .gaon-login-description{font-size:16px;line-height:1.6;color:var(--jk-text-secondary,#4e5968);margin:0}
+.gaon-login-action{margin-top:32px;display:grid;gap:16px}
+#gaon-login .gaon-login-button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;width:100%;padding:16px;color:var(--jk-text,#202733);background:var(--jk-surface,#fff);border:1px solid var(--jk-border,#e5e8eb);border-radius:var(--jk-radius-control,14px);font-size:15px;font-weight:600;text-decoration:none;line-height:1.4;transition:background 160ms}
+#gaon-login .gaon-login-button:hover{background:var(--jk-selected,#edf3ff);border-color:var(--jk-action,#3563e9)}
+.gaon-login-button svg{width:20px;height:20px;flex-shrink:0}
+#gaon-login [data-portal-status]{font-size:14px;line-height:1.6;margin:0;color:var(--jk-text-secondary,#4e5968);overflow-wrap:anywhere}
+#gaon-login .gaon-login-retry{justify-self:start;min-height:48px;border:0;border-radius:8px;padding:8px 16px;background:var(--jk-selected,#edf3ff);color:var(--jk-action,#3563e9);font:inherit;font-weight:600;cursor:pointer}
+#gaon-login .gaon-login-help{margin:32px 0 0;padding-top:24px;border-top:1px solid var(--jk-border,#e5e8eb);font-size:13px;line-height:1.6;color:var(--jk-text-muted,#5f6b7a)}
+.gaon-login-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:24px 0 0;font-size:11px;font-weight:600;letter-spacing:1px;color:var(--jk-text-muted,#5f6b7a)}
+.gaon-login-footer span{font-size:12px;font-weight:400;letter-spacing:0}
+#gaon-login :is(a,button):focus-visible{outline:3px solid var(--jk-focus,#3563e9);outline-offset:4px}
+@media(max-width:480px){#gaon-login{padding:32px 16px}.gaon-login-card{padding:32px 24px}#gaon-login h1{font-size:28px}.gaon-login-brand{margin-bottom:24px}}
+@media(prefers-reduced-motion:reduce){#gaon-login *{transition:none!important}}
+
+/* Only the initial authenticated boot owns this overlay; route changes keep the workspace visible. */
+html[data-gaon-startup="true"] #gaon-login{visibility:hidden}
+#gaon-startup[hidden],#gaon-startup [hidden]{display:none!important}
+.gaon-startup{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:32px;text-align:center;background:var(--jk-canvas,#f5f6f8);color:var(--jk-text,#202733);font-family:var(--jk-font-body,"Pretendard Variable",Pretendard,sans-serif)}
+.gaon-startup-mark{position:relative;width:96px;height:96px;display:grid;place-items:center;margin-bottom:8px}
+.gaon-startup-spinner{position:absolute;inset:0;border:3px solid var(--jk-border,#e5e8eb);border-top-color:var(--jk-action,#3563e9);border-radius:50%;animation:gaon-startup-turn 1s linear infinite}
+.gaon-startup>strong{font-family:"Bricolage Grotesque",sans-serif;font-size:24px;letter-spacing:1px}
+.gaon-startup h1{font:700 24px/1.4 var(--jk-font-body,"Pretendard Variable",Pretendard,sans-serif);margin:0}
+.gaon-startup p{max-width:400px;margin:0;font-size:16px;line-height:1.6;color:var(--jk-text-secondary,#4e5968)}
+@keyframes gaon-startup-turn{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.gaon-startup-spinner{animation:none;border-top-width:6px}}
+
+/* ── 로그인 화면 다시 꾸미기 (2026-10-27 사용자 요청: 메디워크처럼) ─────────────────
+   먹빛 남색 위 가온 파랑 빛줄기(WebGL, gaon-login-motion.mjs) · 왼쪽 큰 글자 로고 · 오른쪽 흰 카드. */
+html body #gaon-login.gaon-login.is-motion{position:fixed;inset:0;z-index:50;min-height:100dvh;overflow:hidden;background:radial-gradient(circle at 30% 50%,#1b3f8f 0,#0a1430 36%,#04060d 72%);color:#fff;padding:0}
+html body #gaon-login.is-motion .gaon-login-motion{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:0}
+html body #gaon-login.is-motion .gaon-login-frame{position:relative;z-index:1;box-sizing:border-box;min-height:100dvh;width:100%;max-width:none;margin:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,420px);align-items:center;gap:48px;padding:48px clamp(24px,7vw,120px);background:none;border:0;box-shadow:none}
+html body #gaon-login.is-motion .gaon-login-hero{display:grid;gap:20px;align-content:center}
+html body #gaon-login.is-motion .gaon-login-brand{display:flex;align-items:center;gap:20px;margin:0;color:#fff}
+html body #gaon-login.is-motion .gaon-login-brand img{width:clamp(56px,6vw,88px);height:auto;filter:brightness(0) invert(1) drop-shadow(0 0 24px rgba(100,168,255,.55))}
+html body #gaon-login.is-motion .gaon-login-brand>span:not(.gaon-login-product){font:700 clamp(64px,9vw,136px)/.9 'Bricolage Grotesque',Pretendard,sans-serif;letter-spacing:-.04em;color:#fff}
+html body #gaon-login.is-motion .gaon-login-product{align-self:flex-end;margin-bottom:.6em;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.85);font:600 14px/1 Pretendard,sans-serif;backdrop-filter:blur(6px)}
+html body #gaon-login.is-motion .gaon-login-tagline{margin:0;font:500 clamp(16px,1.4vw,20px)/1.5 Pretendard,sans-serif;color:rgba(255,255,255,.72)}
+html body #gaon-login.is-motion .gaon-login-card{width:100%;box-sizing:border-box;margin:0;padding:40px 32px 32px;border:0;border-radius:24px;background:#fff;color:#191f28;box-shadow:0 30px 80px rgba(0,0,0,.35)}
+html body #gaon-login.is-motion .gaon-login-eyebrow{color:#3182f6}
+html body #gaon-login.is-motion .gaon-login-card h1{color:#191f28}
+html body #gaon-login.is-motion .gaon-login-button{display:flex;align-items:center;justify-content:center;gap:10px;height:56px;border-radius:14px;background:#191f28;color:#fff;border:0;font:600 16px/1 Pretendard,sans-serif;text-decoration:none}
+html body #gaon-login.is-motion .gaon-login-button[hidden]{display:none}
+html body #gaon-login.is-motion .gaon-login-button svg{width:20px;height:20px;padding:6px;border-radius:8px;background:#fff;box-sizing:content-box}
+html body #gaon-login.is-motion .gaon-login-button:hover{background:#000}
+html body #gaon-login.is-motion .gaon-login-footer{display:none}
+html body #gaon-login.is-motion[hidden]{display:none}
+@media(max-width:860px){
+ html body #gaon-login.is-motion .gaon-login-frame{grid-template-columns:1fr;align-content:end;gap:28px;padding:32px 20px calc(24px + env(safe-area-inset-bottom,0px))}
+ html body #gaon-login.is-motion .gaon-login-hero{align-content:start;padding-top:12vh}
+ html body #gaon-login.is-motion .gaon-login-brand>span:not(.gaon-login-product){font-size:64px}
+ html body #gaon-login.is-motion .gaon-login-card{padding:28px 24px 24px;border-radius:20px}
+}
+@media(prefers-reduced-motion:reduce){html body #gaon-login.is-motion .gaon-login-brand img{filter:brightness(0) invert(1)}}
+/* 2026-10-27 보정: 「직원 포털」 이름표 숨김(아래 소개 문구와 뜻이 겹치고 예전 margin-left:auto 로 오른쪽 끝에 떠 있었음) · 왼쪽 여백 고정 */
+html body #gaon-login.is-motion .gaon-login-product{display:none!important}
+html body #gaon-login.is-motion .gaon-login-frame{padding:48px clamp(32px,7vw,120px)!important;width:100%!important;max-width:none!important}
+html body #gaon-login.is-motion .gaon-login-brand{justify-content:flex-start!important;width:auto!important}
+/* 모바일: 위에 빛줄기와 로고, 아래에 화면 바닥에 붙는 흰 시트 */
+@media(max-width:860px){
+ html body #gaon-login.is-motion .gaon-login-frame{grid-template-columns:1fr!important;grid-template-rows:1fr auto!important;align-content:stretch!important;gap:0!important;padding:0!important;min-height:100dvh!important}
+ html body #gaon-login.is-motion .gaon-login-hero{align-self:center!important;align-content:center!important;gap:12px!important;padding:max(48px,env(safe-area-inset-top)) 28px 32px!important}
+ html body #gaon-login.is-motion .gaon-login-brand{gap:12px!important}
+ html body #gaon-login.is-motion .gaon-login-brand img{width:44px!important}
+ html body #gaon-login.is-motion .gaon-login-brand>span:not(.gaon-login-product){font-size:56px!important}
+ html body #gaon-login.is-motion .gaon-login-tagline{font-size:15px!important}
+ html body #gaon-login.is-motion .gaon-login-card{align-self:end!important;border-radius:24px 24px 0 0!important;padding:28px 24px calc(24px + env(safe-area-inset-bottom,0px))!important;box-shadow:0 -12px 40px rgba(0,0,0,.3)!important}
+ html body #gaon-login.is-motion .gaon-login-card h1{font-size:26px!important;line-height:1.3!important;margin:8px 0 10px!important}
+ html body #gaon-login.is-motion .gaon-login-description{font-size:14px!important;margin:0 0 20px!important}
+ html body #gaon-login.is-motion .gaon-login-help{font-size:12px!important}
+}
+/* 모바일: 로그인 카드를 반투명하게 띄운다 (2026-10-27 사용자 요청 — 빛줄기가 비치게) */
+@media(max-width:860px){
+ html body #gaon-login.is-motion .gaon-login-frame{grid-template-rows:1fr auto!important}
+ html body #gaon-login.is-motion .gaon-login-card{margin:0 16px calc(16px + env(safe-area-inset-bottom,0px))!important;width:auto!important;border-radius:24px!important;padding:28px 24px 24px!important;background:rgba(255,255,255,.1)!important;-webkit-backdrop-filter:blur(22px) saturate(140%)!important;backdrop-filter:blur(22px) saturate(140%)!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),0 20px 50px rgba(0,0,0,.35)!important;color:#fff!important}
+ html body #gaon-login.is-motion .gaon-login-eyebrow{color:#a8d1ff!important}
+ html body #gaon-login.is-motion .gaon-login-card h1{color:#fff!important}
+ html body #gaon-login.is-motion :is(.gaon-login-description,[data-portal-status]){color:rgba(255,255,255,.75)!important}
+ html body #gaon-login.is-motion .gaon-login-help{color:rgba(255,255,255,.55)!important;border-top-color:rgba(255,255,255,.14)!important}
+ html body #gaon-login.is-motion .gaon-login-button{background:#fff!important;color:#191f28!important}
+ html body #gaon-login.is-motion .gaon-login-button svg{background:#f2f4f6!important}
+ html body #gaon-login.is-motion .gaon-login-retry{color:#fff!important;border-color:rgba(255,255,255,.3)!important;background:rgba(255,255,255,.08)!important}
+}
+@media(max-width:860px) and (prefers-reduced-transparency:reduce){html body #gaon-login.is-motion .gaon-login-card{background:rgba(16,24,44,.92)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}}
+/* 모바일: 카드 바탕은 위가 투명, 아래로 갈수록 흰색 (2026-10-27 사용자 요청) — 위 제목·설명은 흰 글자, 아래 안내는 진한 글자, 버튼은 검정 */
+@media(max-width:860px){
+ html body #gaon-login.is-motion .gaon-login-card{background:linear-gradient(180deg,rgba(255,255,255,.04) 0%,rgba(255,255,255,.08) 40%,rgba(255,255,255,.86) 62%,#fff 82%)!important;-webkit-backdrop-filter:blur(14px)!important;backdrop-filter:blur(14px)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 20px 50px rgba(0,0,0,.3)!important}
+ html body #gaon-login.is-motion .gaon-login-card h1{color:#fff!important;text-shadow:0 1px 12px rgba(0,0,0,.25)}
+ html body #gaon-login.is-motion .gaon-login-description{color:rgba(255,255,255,.8)!important}
+ html body #gaon-login.is-motion .gaon-login-button{background:#191f28!important;color:#fff!important}
+ html body #gaon-login.is-motion .gaon-login-button svg{background:#fff!important}
+ html body #gaon-login.is-motion [data-portal-status]{color:#4e5968!important}
+ html body #gaon-login.is-motion .gaon-login-help{color:#6b7684!important;border-top-color:#e5e8eb!important}
+ html body #gaon-login.is-motion .gaon-login-retry{color:#191f28!important;background:#f2f4f6!important;border-color:transparent!important}
+}
+
+/* 데스크톱 앱에서만 쓰는 것 */
+#gaon-login .gaon-login-button[hidden]{display:none}
+#gaon-login button.gaon-login-button{font-family:inherit;cursor:pointer}
+#gaon-login button.gaon-login-button:disabled{opacity:.55;cursor:wait}
+#gaon-login #status.is-error{color:#e42939}
+#gaon-login .gaon-login-links{display:flex;justify-content:center;margin-top:12px}
+#gaon-login .gaon-login-link{border:0;background:transparent;padding:6px 8px;border-radius:8px;color:var(--jk-text-muted,#5f6b7a);font:inherit;font-size:13px;cursor:pointer}
+#gaon-login .gaon-login-link:hover{text-decoration:underline}
+#gaon-login :is(button,a):focus-visible{outline:2px solid #3182f6;outline-offset:2px}
