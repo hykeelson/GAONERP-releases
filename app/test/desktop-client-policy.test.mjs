@@ -99,3 +99,13 @@ test('device classifier review changes only the ERP query and preserves the curr
  assert.equal(clientDeviceReviewURL(clientDeviceReviewURL(raw,origin,true),origin,false),raw);
  for(const denied of ['https://example.com/erp/home.html',origin+'/api/gaon/home','file:///erp/home.html','https://user@gaon-erp-keelson.web.app/erp/home.html',origin+'/erp/other.html'])assert.throws(()=>clientDeviceReviewURL(denied,origin,true));
 });
+
+test('2026-10-29 설치 앱 전수 검사: 복사·전화·메일·PDF·주소 검색·지도 타일은 웹과 같이 된다',async()=>{
+ const {cloudRendererNetworkAllowed:allow,clientPermissionAllowed,clientExternalProtocol}=await import('../desktop-client-policy.mjs');const origin='https://gaon-erp-keelson.web.app';
+ for(const url of ['https://photon.komoot.io/api?q=x','https://tile.openstreetmap.org/1/1/1.png','chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html','chrome://resources/js/load_time_data.js'])assert.equal(allow(url,origin),true,url);
+ for(const url of ['https://evil.example/x.js','chrome-extension://other/index.html','chrome://settings/','https://photon.komoot.io.evil.example/x','http://tile.openstreetmap.org/1/1/1.png'])assert.equal(allow(url,origin),false,url);
+ assert.equal(clientPermissionAllowed('clipboard-sanitized-write',origin,origin),true);assert.equal(clientPermissionAllowed('clipboard-read',origin,origin),true);
+ assert.equal(clientPermissionAllowed('clipboard-read','https://evil.example',origin),false);assert.equal(clientPermissionAllowed('media',origin,origin),false);assert.equal(clientPermissionAllowed('notifications',origin,origin),false);
+ for(const url of ['tel:01012345678','tel:010-1234-5678','sms:01012345678','mailto:a@example.com'])assert.equal(clientExternalProtocol(url),true,url);
+ for(const url of ['tel:abc','mailto:a@b.com,c@d.com','javascript:alert(1)','file:///etc/passwd','ms-settings:privacy','https://gaon-erp-keelson.web.app/'])assert.equal(clientExternalProtocol(url),false,url);
+});

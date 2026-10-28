@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createDesktopNotifications,openDesktopNotificationSystemSettings,prepareWindowsNotificationShortcut,createNativeNotifier,createNotificationPreferenceStore,installDesktopNotificationIPC} from './desktop-notifications.mjs';
 import {startDesktopUpdater} from './desktop-updater.mjs';
-import {clientWebPreferences,clientURLAction,trustedClientStatus,trustedClientDownload,cloudRendererNetworkAllowed,clientDeviceReviewURL} from './desktop-client-policy.mjs';
+import {clientWebPreferences,clientURLAction,trustedClientStatus,trustedClientDownload,cloudRendererNetworkAllowed,clientDeviceReviewURL,clientPermissionAllowed,clientExternalProtocol} from './desktop-client-policy.mjs';
 
 app.setName('GAON ERP');
 if(process.platform==='win32')app.setAppUserModelId('studio.keelson.gaon.erp');
@@ -67,11 +67,12 @@ function configureSession(){
  current.webRequest.onBeforeRequest((details,callback)=>{if(serverOrigin===desktopCloudOrigin&&details.webContentsId===window?.webContents.id)callback({cancel:!setupAssetURLs.has(details.url)&&!cloudRendererNetworkAllowed(details.url,desktopCloudOrigin)});else callback({cancel:false});});
  current.setPermissionRequestHandler(async(webContents,permission,callback,details)=>{
   const requestingOrigin=(()=>{try{return new URL(details?.requestingUrl||webContents.getURL()).origin;}catch{return '';}})();
+  if(permission!=='geolocation')return callback(webContents===window?.webContents&&signedIn&&clientPermissionAllowed(permission,requestingOrigin,serverOrigin));
   if(permission!=='geolocation'||webContents!==window?.webContents||!signedIn||!serverOrigin||requestingOrigin!==serverOrigin)return callback(false);
   const result=await dialog.showMessageBox(window,{type:'question',title:'GAON ERP · 위치 사용',message:'출퇴근 위치 확인을 위해 현재 위치 사용을 허용할까요?',detail:'위치 정보는 연결한 GAON ERP 서버의 출퇴근 기능에서만 사용합니다.',buttons:['허용','허용 안 함'],defaultId:1,cancelId:1});
   locationGranted=result.response===0;callback(locationGranted);
  });
- current.setPermissionCheckHandler((webContents,permission,requestingOrigin)=>webContents===window?.webContents&&permission==='geolocation'&&signedIn&&locationGranted&&requestingOrigin===serverOrigin);
+ current.setPermissionCheckHandler((webContents,permission,requestingOrigin)=>webContents===window?.webContents&&signedIn&&(permission==='geolocation'?locationGranted&&requestingOrigin===serverOrigin:clientPermissionAllowed(permission,requestingOrigin,serverOrigin)));
  current.on('will-download',(event,item,contents)=>{if(!contents||!trustedClientDownload(item.getURL(),serverOrigin)){event.preventDefault();return;}item.setSaveDialogOptions({title:'GAON ERP · 파일 저장',defaultPath:path.join(app.getPath('downloads'),path.basename(item.getFilename()))});});
 }
 function configureNotifications(){
@@ -111,7 +112,7 @@ async function showSetup(message=''){
  }
 }
 async function openERP(){if(!serverOrigin||!signedIn)throw Error('직원 로그인이 필요합니다.');await window.loadURL(serverOrigin+(serverOrigin===desktopCloudOrigin?cloudReturn:'/erp/home.html#today'));focus();}
-function routeURL(url,action=clientURLAction(url,serverOrigin)){if(action==='login'||action==='drive')beginLogin(action==='drive'?'drive':'login').catch(error=>dialog.showMessageBox({type:'warning',title:'직원 로그인',message:error.message}));else if(action==='external')openExternalLink(url).catch(()=>{});else if(action==='internal'&&signedIn)window?.loadURL(url);}
+function routeURL(url,action=clientURLAction(url,serverOrigin)){if(clientExternalProtocol(url)){shell.openExternal(url).catch(()=>dialog.showMessageBox(window,{type:'info',title:'GAON ERP',message:'이 컴퓨터에 전화·메일을 열 앱이 없습니다.',detail:decodeURIComponent(url.replace(/^[a-z]+:/,''))}));return;}if(action==='login'||action==='drive')beginLogin(action==='drive'?'drive':'login').catch(error=>dialog.showMessageBox({type:'warning',title:'직원 로그인',message:error.message}));else if(action==='external')openExternalLink(url).catch(()=>{});else if(action==='internal'&&signedIn)window?.loadURL(url);}
 async function openExternalLink(url){const target=new URL(url);const answer=await dialog.showMessageBox(window,{type:'question',title:'외부 페이지 열기',message:target.hostname+'에서 페이지를 열까요?',detail:'GAON 프로그램 밖의 기본 브라우저에서 열립니다.\n'+url,buttons:['열기','취소'],defaultId:1,cancelId:1});if(answer.response===0)await shell.openExternal(url);}
 async function openManual(){
  const file=path.join(app.getAppPath(),'app/desktop-client-manual.html');if(!await access(file).then(()=>true,()=>false)){await dialog.showMessageBox(window,{title:'빠른 사용 안내',message:'1. 기본 GAON 서버 주소를 확인합니다.\n2. 직원 로그인을 누르고 기본 브라우저에서 로그인합니다.\n3. 로그인 완료 후 앱으로 돌아오면 ERP가 열립니다.',detail:'서버 주소 변경이 필요하면 도움말 메뉴에서 연결 설정을 여세요.'});return;}
