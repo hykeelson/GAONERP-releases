@@ -104,66 +104,59 @@ jobs:
           using System;
           using System.Runtime.InteropServices;
           public static class GaonUpdateButton {
-            [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
-            [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
-            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint msg,IntPtr w,IntPtr l);
+            [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr h);
+            [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr h,int p);
+            [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr h);
+            [DllImport("user32.dll")] public static extern uint GetMenuItemID(IntPtr h,int p);
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetMenuString(IntPtr h,uint p,System.Text.StringBuilder text,int max,uint flag);
           }
           "@
-          $clicked = $false
-          for ($i = 0; $i -lt 120 -and !$clicked; $i++) {
+          $later = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,'나중에')
+          $dialog = $null
+          for ($i = 0; $i -lt 100 -and !$dialog; $i++) {
             Start-Sleep -Seconds 2
             foreach ($win in $root.FindAll([Windows.Automation.TreeScope]::Children,$byPid)) {
-              $button = $win.FindFirst([Windows.Automation.TreeScope]::Descendants,$byButton)
-              if ($button) {
-                $invoke = $null
-                if ($button.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$invoke)) {
-                  $invoke.Invoke()
-                } else {
-                  # The native dialog can expose the caption as a text child of a button.
-                  $target = $button
-                  while ($target -and $target.Current.ControlType -ne [Windows.Automation.ControlType]::Button) {
-                    $target = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($target)
-                  }
-                  if ($target -and $target.Current.NativeWindowHandle) {
-                    $buttonId = [GaonUpdateButton]::GetDlgCtrlID([IntPtr]$target.Current.NativeWindowHandle)
-                    Write-Host "Update dialog button id $buttonId, dialog class $($win.Current.ClassName)"
-                    if ($buttonId -le 0) { throw 'Invalid update dialog button' }
-                    [void][GaonUpdateButton]::SendMessage([IntPtr]$win.Current.NativeWindowHandle,0x0466,[IntPtr]$buttonId,[IntPtr]::Zero)
-                  } else {
-                    # Electron sets Restart now as the default. Activate only this verified update dialog.
-                    $sh = New-Object -ComObject WScript.Shell
-                    if (!$sh.AppActivate('GAON ERP 업데이트')) { throw 'Could not activate update dialog' }
-                    $sh.SendKeys('{ENTER}')
-                  }
-                }
-                $clicked = $true
-                break
-              }
+              if ($win.FindFirst([Windows.Automation.TreeScope]::Descendants,$later) -and $win.FindFirst([Windows.Automation.TreeScope]::Descendants,$byButton)) { $dialog = $win; break }
             }
           }
-          if (!$clicked) { throw 'Installed 0.3.5 did not offer the live update' }
-          $lastWizard = ''
-          for ($i = 0; $i -lt 75; $i++) {
+          if (!$dialog) { throw 'The installed 0.3.5 client did not download the update' }
+          Write-Host "0.3.5 downloaded the live update. Dialog: $($dialog.Current.Name)"
+          # Closing this prompt maps to the app's cancelId (나중에); quitting via File > Exit installs it.
+          [void][GaonUpdateButton]::PostMessage([IntPtr]$dialog.Current.NativeWindowHandle,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)
+          Start-Sleep -Seconds 2
+          $client.Refresh()
+          $window = $client.MainWindowHandle
+          $menu = [GaonUpdateButton]::GetMenu($window)
+          $file = [GaonUpdateButton]::GetSubMenu($menu,0)
+          $quitId = 0
+          for ($i=0; $i -lt [GaonUpdateButton]::GetMenuItemCount($file); $i++) {
+            $label = New-Object System.Text.StringBuilder 256
+            [void][GaonUpdateButton]::GetMenuString($file,$i,$label,256,0x400)
+            if ($label.ToString() -match '종료|Exit|Quit') { $quitId=[GaonUpdateButton]::GetMenuItemID($file,$i); break }
+          }
+          if (!$quitId) {
+            # Chromium draws its own menu. Use Electron's application-menu shortcut for File > Exit.
+            $sh = New-Object -ComObject WScript.Shell
+            if (!$sh.AppActivate($client.Id)) { throw 'Cannot focus baseline app' }
+            $sh.SendKeys('%'); Start-Sleep -Milliseconds 250
+            $sh.SendKeys('{DOWN}'); Start-Sleep -Milliseconds 250
+            $sh.SendKeys('{END}{ENTER}')
+          } else {
+            [void][GaonUpdateButton]::PostMessage($window,0x0111,[IntPtr]$quitId,[IntPtr]::Zero)
+          }
+          if (!$client.WaitForExit(15000)) { throw 'File > Exit did not exit the old process' }
+          for ($i=0; $i -lt 90; $i++) {
             Start-Sleep -Seconds 2
-            # 0.3.5 passes isSilent=false, so the assisted installer can require confirmation.
-            $installers = @(Get-Process | Where-Object { $_.MainWindowHandle -and $_.MainWindowTitle -match 'GAON' -and $_.ProcessName -ne 'GAON ERP' })
-            foreach ($wizard in $installers) {
-              $form = [Windows.Automation.AutomationElement]::FromHandle($wizard.MainWindowHandle)
-              $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Button)
-              $choices = @($form.FindAll([Windows.Automation.TreeScope]::Descendants,$condition) | Where-Object { $_.Current.IsEnabled })
-              $state = ($choices | ForEach-Object { $_.Current.Name }) -join ','
-              if ($state -ne $lastWizard) { Write-Host "Installer prompt: $state"; $lastWizard = $state }
-              $next = $choices | Where-Object { $_.Current.Name -match '^(다음|설치|마침|완료|종료|Next|Install|Finish|Close)' } | Select-Object -First 1
-              if ($next -and $next.Current.NativeWindowHandle) {
-                [void][GaonUpdateButton]::PostMessage([IntPtr]$next.Current.NativeWindowHandle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)
-              }
-            }
-            $new = @(Get-Process -Name 'GAON ERP' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe -and $_.Id -ne $client.Id -and $_.MainWindowHandle -ne 0 })
-            if ($new.Count -and (Get-Item $exe).VersionInfo.ProductVersion -in $expected,($expected+'.0')) {
-              Write-Host "Installed 0.3.5 downloaded the published update and relaunched $expected."
-              exit 0
+            if ((Test-Path $exe) -and (Get-Item $exe).VersionInfo.ProductVersion -in $expected,($expected+'.0')) { break }
+          }
+          if (!(Test-Path $exe) -or (Get-Item $exe).VersionInfo.ProductVersion -notin $expected,($expected+'.0')) { throw 'Automatic installation on exit failed' }
+          $updated = Start-Process $exe -PassThru
+          for ($i=0; $i -lt 30; $i++) {
+            Start-Sleep -Milliseconds 500
+            $updated.Refresh()
+            if (!$updated.HasExited -and $updated.MainWindowHandle -ne 0 -and $updated.MainWindowTitle -eq 'GAON ERP') {
+              Write-Host "Verified 0.3.5 -> $expected on normal exit and subsequent launch"; exit 0
             }
           }
-          if (Test-Path $exe) { Write-Host "Disk version: $((Get-Item $exe).VersionInfo.ProductVersion)" }
-          Get-Process | Where-Object { $_.ProcessName -match 'GAON|setup' -or $_.MainWindowTitle -match 'GAON' } | Format-Table Id,ProcessName,MainWindowTitle,Path
-          throw 'Updated app did not relaunch from the baseline installation'
+          throw 'Updated executable did not open its window'
