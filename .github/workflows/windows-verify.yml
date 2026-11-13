@@ -86,9 +86,12 @@ jobs:
           $expected = ((Get-Content latest.yml | Select-String '^version: (.+)$').Matches[0].Groups[1].Value).Trim()
           if ([version]$expected -le [version]'0.3.5') { throw 'Invalid upgrade target' }
           $old = Join-Path $env:RUNNER_TEMP 'GAON-035.exe'
-          $dir = Join-Path $env:RUNNER_TEMP 'GAON-Upgrade-Test'
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs/GAON ERP'
           Invoke-WebRequest -Uri 'https://github.com/hykeelson/GAONERP-releases/releases/download/v0.3.5/GAON-ERP-Setup-x64.exe' -OutFile $old
-          $p = Start-Process $old -ArgumentList '/S',("/D=" + $dir) -Wait -PassThru
+          $p = Start-Process $old -ArgumentList '/S' -Wait -PassThru
+          $installed = @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Filter 'GAON ERP.exe' -Recurse)
+          if ($installed.Count -ne 1) { throw 'Default GAON install location not found' }
+          $dir = $installed[0].DirectoryName
           if ($p.ExitCode -ne 0) { throw 'Baseline install failed' }
           $exe = Join-Path $dir 'GAON ERP.exe'
           if ((Get-Item $exe).VersionInfo.ProductVersion.TrimEnd() -notin '0.3.5','0.3.5.0') { throw 'Wrong baseline' }
@@ -101,6 +104,8 @@ jobs:
           using System;
           using System.Runtime.InteropServices;
           public static class GaonUpdateButton {
+            [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+            [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
             [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
           }
           "@
@@ -120,7 +125,10 @@ jobs:
                     $target = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($target)
                   }
                   if ($target -and $target.Current.NativeWindowHandle) {
-                    if (![GaonUpdateButton]::PostMessage([IntPtr]$target.Current.NativeWindowHandle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)) { throw 'Restart button did not accept click' }
+                    $buttonId = [GaonUpdateButton]::GetDlgCtrlID([IntPtr]$target.Current.NativeWindowHandle)
+                    Write-Host "Update dialog button id $buttonId, dialog class $($win.Current.ClassName)"
+                    if ($buttonId -le 0) { throw 'Invalid update dialog button' }
+                    [void][GaonUpdateButton]::SendMessage([IntPtr]$win.Current.NativeWindowHandle,0x0466,[IntPtr]$buttonId,[IntPtr]::Zero)
                   } else {
                     # Electron sets Restart now as the default. Activate only this verified update dialog.
                     $sh = New-Object -ComObject WScript.Shell
@@ -156,4 +164,6 @@ jobs:
               exit 0
             }
           }
+          if (Test-Path $exe) { Write-Host "Disk version: $((Get-Item $exe).VersionInfo.ProductVersion)" }
+          Get-Process | Where-Object { $_.ProcessName -match 'GAON|setup' -or $_.MainWindowTitle -match 'GAON' } | Format-Table Id,ProcessName,MainWindowTitle,Path
           throw 'Updated app did not relaunch from the baseline installation'
