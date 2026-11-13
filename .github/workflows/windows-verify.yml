@@ -134,8 +134,22 @@ jobs:
             }
           }
           if (!$clicked) { throw 'Installed 0.3.5 did not offer the live update' }
+          $lastWizard = ''
           for ($i = 0; $i -lt 75; $i++) {
             Start-Sleep -Seconds 2
+            # 0.3.5 passes isSilent=false, so the assisted installer can require confirmation.
+            $installers = @(Get-Process | Where-Object { $_.MainWindowHandle -and $_.MainWindowTitle -match 'GAON' -and $_.ProcessName -ne 'GAON ERP' })
+            foreach ($wizard in $installers) {
+              $form = [Windows.Automation.AutomationElement]::FromHandle($wizard.MainWindowHandle)
+              $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Button)
+              $choices = @($form.FindAll([Windows.Automation.TreeScope]::Descendants,$condition) | Where-Object { $_.Current.IsEnabled })
+              $state = ($choices | ForEach-Object { $_.Current.Name }) -join ','
+              if ($state -ne $lastWizard) { Write-Host "Installer prompt: $state"; $lastWizard = $state }
+              $next = $choices | Where-Object { $_.Current.Name -match '^(다음|설치|마침|완료|종료|Next|Install|Finish|Close)' } | Select-Object -First 1
+              if ($next -and $next.Current.NativeWindowHandle) {
+                [void][GaonUpdateButton]::PostMessage([IntPtr]$next.Current.NativeWindowHandle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)
+              }
+            }
             $new = @(Get-Process -Name 'GAON ERP' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe -and $_.Id -ne $client.Id -and $_.MainWindowHandle -ne 0 })
             if ($new.Count -and (Get-Item $exe).VersionInfo.ProductVersion -in $expected,($expected+'.0')) {
               Write-Host "Installed 0.3.5 downloaded the published update and relaunched $expected."
