@@ -97,13 +97,37 @@ jobs:
           $root = [Windows.Automation.AutomationElement]::RootElement
           $byPid = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty,$client.Id)
           $byButton = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,'지금 다시 시작')
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class GaonUpdateButton {
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+          }
+          "@
           $clicked = $false
           for ($i = 0; $i -lt 120 -and !$clicked; $i++) {
             Start-Sleep -Seconds 2
             foreach ($win in $root.FindAll([Windows.Automation.TreeScope]::Children,$byPid)) {
               $button = $win.FindFirst([Windows.Automation.TreeScope]::Descendants,$byButton)
               if ($button) {
-                $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+                $invoke = $null
+                if ($button.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$invoke)) {
+                  $invoke.Invoke()
+                } else {
+                  # The native dialog can expose the caption as a text child of a button.
+                  $target = $button
+                  while ($target -and $target.Current.ControlType -ne [Windows.Automation.ControlType]::Button) {
+                    $target = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($target)
+                  }
+                  if ($target -and $target.Current.NativeWindowHandle) {
+                    if (![GaonUpdateButton]::PostMessage([IntPtr]$target.Current.NativeWindowHandle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)) { throw 'Restart button did not accept click' }
+                  } else {
+                    # Electron sets Restart now as the default. Activate only this verified update dialog.
+                    $sh = New-Object -ComObject WScript.Shell
+                    if (!$sh.AppActivate('GAON ERP 업데이트')) { throw 'Could not activate update dialog' }
+                    $sh.SendKeys('{ENTER}')
+                  }
+                }
                 $clicked = $true
                 break
               }
