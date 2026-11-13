@@ -112,51 +112,63 @@ jobs:
             [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetMenuString(IntPtr h,uint p,System.Text.StringBuilder text,int max,uint flag);
           }
           "@
-          $later = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,'나중에')
-          $dialog = $null
-          for ($i = 0; $i -lt 100 -and !$dialog; $i++) {
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class UpgradeWindows {
+            public delegate bool EnumProc(IntPtr h,IntPtr data);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb,IntPtr data);
+            [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent,EnumProc cb,IntPtr data);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint process);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder text,int max);
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder text,int max);
+            [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
+            public static string Caption(IntPtr h) {var s=new StringBuilder(512);GetWindowText(h,s,512);return s.ToString();}
+            public static bool Click(uint process,string pattern) {
+              bool clicked=false;
+              EnumWindows((w,d)=>{
+                uint p;GetWindowThreadProcessId(w,out p);
+                if(p!=process || !IsWindowVisible(w))return true;
+                EnumChildWindows(w,(c,v)=>{
+                  var cls=new StringBuilder(64);GetClassName(c,cls,64);
+                  var label=Caption(c).Replace("&","").Trim();
+                  if(cls.ToString()!="Button" || !IsWindowVisible(c) || !IsWindowEnabled(c) || !System.Text.RegularExpressions.Regex.IsMatch(label,pattern,System.Text.RegularExpressions.RegexOptions.IgnoreCase))return true;
+                  Console.WriteLine("Windows UI: "+Caption(w)+" / "+label);
+                  clicked=PostMessage(c,0x00F5,IntPtr.Zero,IntPtr.Zero);
+                  return !clicked;
+                },IntPtr.Zero);
+                return !clicked;
+              },IntPtr.Zero);
+              return clicked;
+            }
+          }
+          "@
+          $clicked = $false
+          for ($i=0; $i -lt 90 -and !$clicked; $i++) {
             Start-Sleep -Seconds 2
             foreach ($win in $root.FindAll([Windows.Automation.TreeScope]::Children,$byPid)) {
-              if ($win.FindFirst([Windows.Automation.TreeScope]::Descendants,$later) -and $win.FindFirst([Windows.Automation.TreeScope]::Descendants,$byButton)) { $dialog = $win; break }
+              $b=$win.FindFirst([Windows.Automation.TreeScope]::Descendants,$byButton)
+              if (!$b) { continue }
+              Write-Host 'Installed 0.3.5 offered its downloaded update'
+              $shell=New-Object -ComObject WScript.Shell
+              if (!$shell.AppActivate('GAON ERP 업데이트')) { continue }
+              $shell.SendKeys('{ENTER}'); $clicked=$true; break
             }
           }
-          if (!$dialog) { throw 'The installed 0.3.5 client did not download the update' }
-          Write-Host "0.3.5 downloaded the live update. Dialog: $($dialog.Current.Name)"
-          # Closing this prompt maps to the app's cancelId (나중에); quitting via File > Exit installs it.
-          [void][GaonUpdateButton]::PostMessage([IntPtr]$dialog.Current.NativeWindowHandle,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)
-          Start-Sleep -Seconds 2
-          $client.Refresh()
-          $window = $client.MainWindowHandle
-          $menu = [GaonUpdateButton]::GetMenu($window)
-          $file = [GaonUpdateButton]::GetSubMenu($menu,0)
-          $quitId = 0
-          for ($i=0; $i -lt [GaonUpdateButton]::GetMenuItemCount($file); $i++) {
-            $label = New-Object System.Text.StringBuilder 256
-            [void][GaonUpdateButton]::GetMenuString($file,$i,$label,256,0x400)
-            if ($label.ToString() -match '종료|Exit|Quit') { $quitId=[GaonUpdateButton]::GetMenuItemID($file,$i); break }
-          }
-          if (!$quitId) {
-            # Chromium draws its own menu. Use Electron's application-menu shortcut for File > Exit.
-            $sh = New-Object -ComObject WScript.Shell
-            if (!$sh.AppActivate($client.Id)) { throw 'Cannot focus baseline app' }
-            $sh.SendKeys('%'); Start-Sleep -Milliseconds 250
-            $sh.SendKeys('{DOWN}'); Start-Sleep -Milliseconds 250
-            $sh.SendKeys('{END}{ENTER}')
-          } else {
-            [void][GaonUpdateButton]::PostMessage($window,0x0111,[IntPtr]$quitId,[IntPtr]::Zero)
-          }
-          if (!$client.WaitForExit(15000)) { throw 'File > Exit did not exit the old process' }
-          for ($i=0; $i -lt 90; $i++) {
+          if (!$clicked) { throw 'No restart confirmation' }
+          for ($i=0; $i -lt 65; $i++) {
             Start-Sleep -Seconds 2
-            if ((Test-Path $exe) -and (Get-Item $exe).VersionInfo.ProductVersion -in $expected,($expected+'.0')) { break }
-          }
-          if (!(Test-Path $exe) -or (Get-Item $exe).VersionInfo.ProductVersion -notin $expected,($expected+'.0')) { throw 'Automatic installation on exit failed' }
-          $updated = Start-Process $exe -PassThru
-          for ($i=0; $i -lt 30; $i++) {
-            Start-Sleep -Milliseconds 500
-            $updated.Refresh()
-            if (!$updated.HasExited -and $updated.MainWindowHandle -ne 0 -and $updated.MainWindowTitle -eq 'GAON ERP') {
-              Write-Host "Verified 0.3.5 -> $expected on normal exit and subsequent launch"; exit 0
+            $setups = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'GAON-ERP-Setup*' -or $_.MainWindowTitle -eq 'GAON ERP Setup' })
+            foreach ($setup in $setups) {
+              [void][UpgradeWindows]::Click($setup.Id,'^(다음|설치|마침|완료|종료|확인|Next|Install|Finish|Close|OK)(\s|$|[>(])')
             }
+            if (!(Test-Path $exe) -or (Get-Item $exe).VersionInfo.ProductVersion -notin $expected,($expected+'.0')) { continue }
+            $new = @(Get-Process -Name 'GAON ERP' -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $client.Id -and $_.MainWindowHandle -ne 0 -and $_.Path -eq $exe })
+            if ($new.Count) { Write-Host "Verified published 0.3.5 -> $expected and relaunched GUI"; exit 0 }
           }
-          throw 'Updated executable did not open its window'
+          Get-Process | Where-Object { $_.ProcessName -match 'GAON|setup' -or $_.MainWindowTitle -match 'GAON' } | Format-Table Id,ProcessName,MainWindowTitle
+          throw 'New version and relaunched window not verified'
