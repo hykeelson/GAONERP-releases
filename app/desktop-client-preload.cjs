@@ -1,6 +1,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 
 contextBridge.exposeInMainWorld('gaonDesktop',Object.freeze({
+ homeTax:(registration,month)=>ipcRenderer.invoke('gaon-client:hometax',{registration,month}),
  state:()=>ipcRenderer.invoke('gaon-client:state'),
  reconnect:()=>ipcRenderer.invoke('gaon-client:reconnect'),
  login:()=>ipcRenderer.invoke('gaon-client:login'),

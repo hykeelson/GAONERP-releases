@@ -6,6 +6,10 @@ on:
         description: Successful Windows release build run ID
         required: true
         type: string
+      verify_upgrade:
+        description: Verify the live upgrade from 0.3.5 to the published release
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -73,3 +77,45 @@ jobs:
           path: windows-installer-verification.json
           retention-days: 7
           if-no-files-found: error
+
+      - name: Verify published update from installed 0.3.5
+        if: inputs.verify_upgrade
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = ((Get-Content latest.yml | Select-String '^version: (.+)$').Matches[0].Groups[1].Value).Trim()
+          if ([version]$expected -le [version]'0.3.5') { throw 'Invalid upgrade target' }
+          $old = Join-Path $env:RUNNER_TEMP 'GAON-035.exe'
+          $dir = Join-Path $env:RUNNER_TEMP 'GAON-Upgrade-Test'
+          Invoke-WebRequest -Uri 'https://github.com/hykeelson/GAONERP-releases/releases/download/v0.3.5/GAON-ERP-Setup-x64.exe' -OutFile $old
+          $p = Start-Process $old -ArgumentList '/S',("/D=" + $dir) -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Baseline install failed' }
+          $exe = Join-Path $dir 'GAON ERP.exe'
+          if ((Get-Item $exe).VersionInfo.ProductVersion.TrimEnd() -notin '0.3.5','0.3.5.0') { throw 'Wrong baseline' }
+          Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+          $client = Start-Process $exe -PassThru
+          $root = [Windows.Automation.AutomationElement]::RootElement
+          $byPid = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty,$client.Id)
+          $byButton = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,'지금 다시 시작')
+          $clicked = $false
+          for ($i = 0; $i -lt 120 -and !$clicked; $i++) {
+            Start-Sleep -Seconds 2
+            foreach ($win in $root.FindAll([Windows.Automation.TreeScope]::Children,$byPid)) {
+              $button = $win.FindFirst([Windows.Automation.TreeScope]::Descendants,$byButton)
+              if ($button) {
+                $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+                $clicked = $true
+                break
+              }
+            }
+          }
+          if (!$clicked) { throw 'Installed 0.3.5 did not offer the live update' }
+          for ($i = 0; $i -lt 75; $i++) {
+            Start-Sleep -Seconds 2
+            $new = @(Get-Process -Name 'GAON ERP' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe -and $_.Id -ne $client.Id -and $_.MainWindowHandle -ne 0 })
+            if ($new.Count -and (Get-Item $exe).VersionInfo.ProductVersion -in $expected,($expected+'.0')) {
+              Write-Host "Installed 0.3.5 downloaded the published update and relaunched $expected."
+              exit 0
+            }
+          }
+          throw 'Updated app did not relaunch from the baseline installation'

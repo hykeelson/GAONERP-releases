@@ -1,6 +1,6 @@
 {
   "name": "gaon-erp-windows",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "GAON ERP Windows client",
   "productName": "GAON ERP",
   "author": "GAON ERP",
@@ -39,6 +39,9 @@
       "package.json",
       "app/desktop-client-main.mjs",
       "app/desktop-cloud-session.mjs",
+      "app/desktop-hometax.mjs",
+      "app/desktop-hometax-session.mjs",
+      "app/desktop-hometax-page.mjs",
       "app/desktop-notifications.mjs",
       "app/desktop-updater.mjs",
       "app/desktop-client-policy.mjs",

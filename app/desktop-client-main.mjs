@@ -1,37 +1,53 @@
+import {homeTaxProfileStore} from './desktop-hometax-session.mjs';
+import {openHomeTax} from './desktop-hometax.mjs';
 import {desktopCloudOrigin,createDesktopCredentialStore,createDesktopCloudSession,desktopCloudReply} from './desktop-cloud-session.mjs';
-import {app,BrowserWindow,Menu,dialog,ipcMain,shell,session,Notification,safeStorage} from 'electron';
-import {readFile,access} from 'node:fs/promises';
+import {app,BrowserWindow,Menu,Tray,dialog,ipcMain,shell,session,Notification,safeStorage} from 'electron';
+import {readFile,access,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {createDesktopNotifications,openDesktopNotificationSystemSettings,prepareWindowsNotificationShortcut,createNativeNotifier,createNotificationPreferenceStore,installDesktopNotificationIPC} from './desktop-notifications.mjs';
+import {desktopAppUserModelId,createDesktopNotifications,openDesktopNotificationSystemSettings,prepareWindowsNotificationShortcut,createNativeNotifier,createNotificationPreferenceStore,installDesktopNotificationIPC} from './desktop-notifications.mjs';
 import {startDesktopUpdater} from './desktop-updater.mjs';
 import {clientWebPreferences,clientURLAction,trustedClientStatus,trustedClientDownload,cloudRendererNetworkAllowed,clientDeviceReviewURL,clientPermissionAllowed,clientExternalProtocol} from './desktop-client-policy.mjs';
 
 app.setName('GAON ERP');
-if(process.platform==='win32')app.setAppUserModelId('studio.keelson.gaon.erp');
+// 창이 뜨기 전에 앱 ID 를 정해야 윈도우 알림이 이 앱 이름으로 뜬다.
+if(process.platform==='win32')app.setAppUserModelId(desktopAppUserModelId);
 const here=path.dirname(fileURLToPath(import.meta.url)),setupFile=path.join(here,'desktop-client-setup.html'),setupURL=pathToFileURL(setupFile).href;
 const partition='persist:gaon-erp-client';
 // 첫 화면이 읽어도 되는 앱 안 파일. 여기에 없는 파일은 막힌다 — 2026-10-28 빛줄기·로고·글꼴이 빠져 첫 화면이 멈췄던 일 (desktop-release-package.test.mjs 가 대조).
 const setupAssets=['desktop-client-setup.html','desktop-client-setup.css','desktop-client-setup.mjs','desktop-login-motion.mjs','desktop-gaon-symbol.svg','desktop-fonts/Pretendard-Regular.otf','desktop-fonts/Pretendard-Medium.otf','desktop-fonts/Pretendard-Bold.ttf'];
 const setupAssetURLs=new Set(setupAssets.map(file=>pathToFileURL(path.join(here,file)).href));
-let updater,window,manualWindow,serverOrigin='',connected=false,signedIn=false,loginBusy=false,quitting=false,statusMessage='',locationGranted=false,notifications,connectionBusy=false,cloud,cloudLogin=null,cloudReturn='/erp/home.html#today';
+let taxProfiles,updater,window,manualWindow,serverOrigin='',connected=false,signedIn=false,loginBusy=false,quitting=false,statusMessage='',locationGranted=false,notifications,connectionBusy=false,cloud,cloudLogin=null,cloudReturn='/erp/home.html#today';
 if(!app.isPackaged&&process.env.GAON_DESKTOP_TEST_USER_DATA)app.setPath('userData',path.resolve(process.env.GAON_DESKTOP_TEST_USER_DATA));
 if(!app.requestSingleInstanceLock())app.quit();
 else{
  app.on('second-instance',(_event,args)=>{focus();receiveCloudCallback(args);});
  app.on('open-url',(event,url)=>{event.preventDefault();receiveCloudCallback([url]);});
  app.on('activate',()=>window?focus():start().catch(fail));
- app.on('window-all-closed',()=>app.quit());
+ // 2026-11-04 창을 닫아도 작업표시줄 알림 영역(트레이)에 남아 알림을 받는다. 트레이의 「종료」로만 끈다.
+ app.on('window-all-closed',()=>{if(quitting)app.quit();});
  app.on('before-quit',()=>{quitting=true;updater?.stop();cloud?.cancel();cloudLogin?.reject(Error('앱을 종료했습니다.'));notifications?.stop();});
  app.whenReady().then(start).catch(fail);
 }
 const ses=()=>session.fromPartition(partition);
-function focus(){if(!window||window.isDestroyed())return;if(window.isMinimized())window.restore();window.show();window.focus();}
+// 트레이 아이콘은 실행 파일 아이콘을 쓴다(따로 그림 파일을 넣지 않아도 됨). 처음 한 번만 「컴퓨터 켤 때 자동 실행」을 켠다.
+let tray=null,trayHinted=false;
+async function setupTray(){
+ if(tray||process.platform==='linux')return;
+ const icon=await app.getFileIcon(process.execPath,{size:'small'});
+ tray=new Tray(icon);tray.setToolTip('GAON ERP · 알림 받는 중');
+ tray.setContextMenu(Menu.buildFromTemplate([{label:'GAON ERP 열기',click:()=>focus()},{type:'separator'},{label:'종료',click:()=>{quitting=true;app.quit();}}]));
+ tray.on('click',()=>focus());
+ if(app.isPackaged){const marker=path.join(app.getPath('userData'),'login-item-set');try{await access(marker);}catch{app.setLoginItemSettings({openAtLogin:true});await writeFile(marker,new Date().toISOString()).catch(()=>{});}}
+}
+function trayHint(){if(trayHinted||!tray||process.platform!=='win32')return;trayHinted=true;try{tray.displayBalloon({title:'GAON ERP는 계속 켜져 있어요',content:'알림을 받으려고 오른쪽 아래 알림 영역에 남아 있어요. 끄려면 아이콘을 오른쪽 클릭해 「종료」를 누르세요.'});}catch{}}
+function focus(){if(!window||window.isDestroyed())return;if(window.isMinimized())window.restore();window.show();window.focus();window.flashFrame(false);}
 async function fail(error){await dialog.showMessageBox({type:'error',title:'GAON ERP',message:'앱을 열지 못했습니다.',detail:error.message});app.quit();}
 async function start(){
  // 2026-10-28 사용자 결정: 서버 주소를 고르는 기능은 없앴다. 항상 회사 서버에 붙고 Google 직원 로그인만 쓴다 (맥·윈도우 같은 코드).
  serverOrigin=desktopCloudOrigin;
- cloud=createDesktopCloudSession({store:createDesktopCredentialStore({file:path.join(app.getPath('userData'),'cloud-session.bin'),safeStorage}),fetcher:(...args)=>ses().fetch(...args),onUnauthorized:()=>{signedIn=false;locationGranted=false;notifications?.reset();}});
+ taxProfiles=homeTaxProfileStore(session,path.join(app.getPath('userData'),'hometax-profile.json'));
+ cloud=createDesktopCloudSession({store:createDesktopCredentialStore({file:path.join(app.getPath('userData'),'cloud-session.bin'),safeStorage}),fetcher:(...args)=>ses().fetch(...args),onUnauthorized:()=>{signedIn=false;locationGranted=false;notifications?.reset();taxProfiles.clear().catch(()=>{});}});
  if(app.isPackaged&&process.platform==='win32')app.setAsDefaultProtocolClient('studio.keelson.gaon');
  configureSession();configureNotifications();configureIPC();setMenu();createWindow();
  updater=startDesktopUpdater({app,dialog,getWindow:()=>window});
@@ -41,6 +57,8 @@ async function start(){
 }
 function createWindow(){
  window=new BrowserWindow({title:'GAON ERP',width:1180,height:820,minWidth:880,minHeight:600,show:false,backgroundColor:'#eef3f7',webPreferences:{...clientWebPreferences,partition,preload:path.join(here,'desktop-client-preload.cjs')}});
+ window.on('close',event=>{if(quitting)return;event.preventDefault();window.hide();trayHint();});
+ setupTray().catch(()=>{});
  const wc=window.webContents;
  wc.on('did-finish-load',()=>{if(clientURLAction(wc.getURL(),serverOrigin)==='internal'&&signedIn)notifications?.resume();else notifications?.reset();});
  window.on('closed',()=>notifications?.stop());
@@ -54,7 +72,15 @@ function createWindow(){
 function setupSender(event){if(event.sender!==window?.webContents||event.senderFrame?.url!==setupURL)throw Error('허용되지 않은 화면입니다.');}
 function configureIPC(){
  const cloudSender=event=>{let url;try{url=new URL(event.senderFrame?.url);}catch{}if(event.sender!==window?.webContents||event.senderFrame!==window.webContents.mainFrame||serverOrigin!==desktopCloudOrigin||url?.origin!==desktopCloudOrigin||url.pathname!=='/erp/home.html')throw Error('허용되지 않은 업무 화면입니다.');};
- ipcMain.handle('gaon-cloud:request',async(event,input)=>{cloudSender(event);try{const response=await cloud.request(input);if(input?.path==='/api/gaon/auth/logout'&&response.ok){notifications?.reset();await ses().clearStorageData({origin:desktopCloudOrigin});}return await desktopCloudReply(response);}catch(error){return desktopCloudReply(Response.json({error:error.status?error.message:'업무 연결을 확인하지 못했습니다.'},{status:[400,401,403,405,413].includes(error.status)?error.status:503}));}});
+ ipcMain.handle('gaon-client:hometax',async(event,{registration,month})=>{
+  cloudSender(event);
+  const access=async()=>{const r=await cloud.request({path:'/api/gaon/vat?hometax=access'});if(!r.ok)throw Error('전사 재무 권한을 확인하세요.');const {actor,org}=await r.json();if(typeof actor!=='string'||typeof org!=='string')throw Error('재무 권한 확인에 실패했습니다.');return {actor,org};};
+  const {actor,org}=await access();
+  const collected=await openHomeTax({BrowserWindow,session,parent:window,registration,month,profile:taxProfiles.acquire(org,actor)});
+  cloudSender(event);const current=await access();if(actor!==current.actor||org!==current.org)throw Error('로그인한 직원이 변경됐습니다.');
+  return {actor,...collected};
+ });
+ ipcMain.handle('gaon-cloud:request',async(event,input)=>{cloudSender(event);try{if(input?.path==='/api/gaon/auth/logout')await taxProfiles.clear();const response=await cloud.request(input);if(input?.path==='/api/gaon/auth/logout'&&response.ok){notifications?.reset();await ses().clearStorageData({origin:desktopCloudOrigin});}return await desktopCloudReply(response);}catch(error){return desktopCloudReply(Response.json({error:error.status?error.message:'업무 연결을 확인하지 못했습니다.'},{status:[400,401,403,405,413].includes(error.status)?error.status:503}));}});
  ipcMain.handle('gaon-cloud:login',async(event,returnTo)=>{cloudSender(event);cloudReturn=safeCloudDesktopReturn(returnTo);await beginLogin();return {signedIn:true};});
  ipcMain.handle('gaon-client:state',event=>{setupSender(event);return {serverOrigin,connected,signedIn,message:statusMessage||(connected?(signedIn?'직원 로그인이 확인됐습니다.':'등록된 직원 계정으로 로그인해 주세요.'):'회사 서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.')};});
  ipcMain.handle('gaon-client:reconnect',async event=>{setupSender(event);return updateConnection(async()=>{await verifyServer();signedIn=await sessionVerified(serverOrigin);statusMessage=signedIn?'직원 로그인이 확인됐습니다.':'등록된 직원 계정으로 로그인해 주세요.';return {serverOrigin,connected,signedIn,message:statusMessage};});});
@@ -76,7 +102,7 @@ function configureSession(){
  current.on('will-download',(event,item,contents)=>{if(!contents||!trustedClientDownload(item.getURL(),serverOrigin)){event.preventDefault();return;}item.setSaveDialogOptions({title:'GAON ERP · 파일 저장',defaultPath:path.join(app.getPath('downloads'),path.basename(item.getFilename()))});});
 }
 function configureNotifications(){
- notifications=createDesktopNotifications({fetcher:async(input,options={})=>serverOrigin===desktopCloudOrigin?cloud.request({path:new URL(input).pathname+new URL(input).search,method:options.method||'GET',headers:options.headers,body:options.body}):ses().fetch(input,options),getOrigin:()=>serverOrigin,isInternal:url=>clientURLAction(url,serverOrigin)==='internal',supported:()=>Notification.isSupported(),prepare:()=>prepareWindowsNotificationShortcut({app,shell}),createNotification:createNativeNotifier(Notification),preferences:createNotificationPreferenceStore(path.join(app.getPath('userData'),'notifications.json')),onTestOpen:async()=>focus(),openSettings:()=>openDesktopNotificationSystemSettings({shell}),onUnauthorized:()=>{signedIn=false;locationGranted=false;},onOpen:async url=>{if(!window||window.isDestroyed()||!signedIn||clientURLAction(url,serverOrigin)!=='internal')return;await window.loadURL(url);focus();}});
+ notifications=createDesktopNotifications({fetcher:async(input,options={})=>serverOrigin===desktopCloudOrigin?cloud.request({path:new URL(input).pathname+new URL(input).search,method:options.method||'GET',headers:options.headers,body:options.body}):ses().fetch(input,options),getOrigin:()=>serverOrigin,isInternal:url=>clientURLAction(url,serverOrigin)==='internal',supported:()=>Notification.isSupported(),prepare:()=>prepareWindowsNotificationShortcut({app,shell}),createNotification:createNativeNotifier(Notification),preferences:createNotificationPreferenceStore(path.join(app.getPath('userData'),'notifications.json')),onTestOpen:async()=>focus(),onShown:()=>{if(window&&!window.isDestroyed()&&!window.isFocused())window.flashFrame(true);},openSettings:()=>openDesktopNotificationSystemSettings({shell}),onUnauthorized:()=>{signedIn=false;locationGranted=false;},onOpen:async url=>{if(!window||window.isDestroyed()||!signedIn||clientURLAction(url,serverOrigin)!=='internal')return;await window.loadURL(url);focus();}});
  installDesktopNotificationIPC(ipcMain,{controller:notifications,getWindow:()=>window,isInternal:url=>clientURLAction(url,serverOrigin)==='internal'});
 }
 async function verifyServer(){await cloud.health();connected=true;return true;}

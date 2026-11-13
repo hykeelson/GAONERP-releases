@@ -3,8 +3,24 @@ import path from 'node:path';
 import {readFile,writeFile,rename,access} from 'node:fs/promises';
 const uuid='[a-f\\d]{8}-(?:[a-f\\d]{4}-){3}[a-f\\d]{12}',scopePattern=new RegExp(`^${uuid}:${uuid}$`,'i'),idPattern=new RegExp(`^${uuid}$`,'i');
 export const desktopNotificationOptions=Object.freeze({title:'GAON ERP 업무 알림',body:'새 업무 메시지가 도착했습니다. 앱에서 확인해 주세요.',silent:false});
+// 2026-11-04 종류별 알림 문구. 이름·금액·메시지 내용은 넣지 않는다. 출동은 누를 때까지 화면에 남긴다(윈도우 timeoutType).
+export const desktopNotificationKinds=Object.freeze({
+ talk:desktopNotificationOptions,
+ 'work-deadline':Object.freeze({...desktopNotificationOptions,body:'담당 업무의 마감이 가까워졌습니다. 앱에서 확인해 주세요.'}),
+ 'work-dispatch':Object.freeze({title:'GAON ERP 출동 알림',body:'곧 출동 시간입니다. 눌러서 작업 내용을 확인해 주세요.',silent:false,timeoutType:'never',urgency:'critical'}),
+ 'payment-return':Object.freeze({title:'GAON ERP 보증금 반환 요청',body:'퇴실 정산이 끝나 보증금 반환 요청이 들어왔습니다. 눌러서 확인해 주세요.',silent:false,timeoutType:'never'}),
+ // 2026-11-04 새 민원·작업 접수(SQL 110). 건물·제목은 넣지 않는다(화면 잠금에서도 보이므로). 누르면 그 작업 화면.
+ 'work-intake':Object.freeze({title:'GAON ERP 새 민원·작업',body:'새 민원·작업이 접수됐습니다. 눌러서 내용을 확인해 주세요.',silent:false})
+});
+const itemKind=item=>item?.kind===undefined?'talk':item.kind;
+// 앱이 받는 알림 종류와 각 종류가 꼭 가져야 할 id.
+const itemValid=item=>{if(!idPattern.test(item?.messageId))return false;const kind=itemKind(item);return kind==='talk'?idPattern.test(item.roomId):kind==='work-deadline'||kind==='work-dispatch'||kind==='work-intake'?idPattern.test(item.workId):kind==='payment-return'?idPattern.test(item.paymentId):false;};
+// 누르면 열 화면. 업무톡 · 작업 · 지급 요청.
+export function desktopNotificationRoute(item){const kind=itemKind(item);return kind==='talk'?'#erp/talk/'+item.roomId+'/'+item.messageId:kind==='payment-return'?'#erp/payment-requests/'+item.paymentId:'#erp/work-orders/'+item.workId;}
+// 윈도우 앱 ID(AUMID). 설치본 appId(docs/windows-release.package.json build.appId)와 같아야 윈도우 알림 센터에 뜬다. 코드 서명과는 별개.
+export const desktopAppUserModelId='studio.keelson.gaon.erp';
 export async function prepareWindowsNotificationShortcut({platform=process.platform,app,shell,exists=async file=>access(file).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;})}){
- if(platform!=='win32')return;const id='studio.keelson.gaon.erp',file=path.win32.join(app.getPath('appData'),'Microsoft','Windows','Start Menu','Programs','GAON ERP.lnk'),target=app.getPath('exe');
+ if(platform!=='win32')return;const id=desktopAppUserModelId,file=path.win32.join(app.getPath('appData'),'Microsoft','Windows','Start Menu','Programs','GAON ERP.lnk'),target=app.getPath('exe');
  if(await exists(file)){const current=shell.readShortcutLink(file);if(current.appUserModelId!==id&&path.win32.normalize(current.target).toLowerCase()!==path.win32.normalize(target).toLowerCase())throw Error('기존 GAON ERP 시작 메뉴 바로가기를 확인해 주세요.');}
  if(!shell.writeShortcutLink(file,'create',{target,cwd:path.win32.dirname(target),appUserModelId:id,description:'GAON ERP 업무 공간'}))throw Error('시작 메뉴에 앱 알림 연결을 준비하지 못했습니다.');
 }
@@ -35,11 +51,12 @@ export function observeDesktopLogout(ses,{getOrigin,controller}){
   try{const u=new URL(details.url);if(u.origin===getOrigin()&&u.pathname==='/api/gaon/auth/logout'&&details.method==='POST'&&details.statusCode>=200&&details.statusCode<300)controller.signedOut();}catch{}
  });
 }
-export function createDesktopNotifications({fetcher,getOrigin,isInternal,createNotification,supported=()=>true,preferences={read:async()=>({}),write:async()=>{}},onUnauthorized=()=>{},onOpen=()=>{},onTestOpen=()=>{},openSettings=async()=>{throw Error('운영체제의 알림 설정을 직접 열어 주세요.');},prepare=async()=>{},clock=Date.now,setTimer=setTimeout,clearTimer=clearTimeout,interval=30000}={}){
- let scope='',cursor='',checkpoint=null,enabled=false,mode='mentions',connected=false,active=true,generation=0,working=null,timer=null,failures=0,notice=null,message='',delivered=0,configuring=false;
- let prefs=null,testNotice=null,testTimer=null,testSequence=0,testState={state:'idle',at:null};const seen=new Set(),requests=new Set();
+export function createDesktopNotifications({fetcher,getOrigin,isInternal,createNotification,supported=()=>true,preferences={read:async()=>({}),write:async()=>{}},onUnauthorized=()=>{},onOpen=()=>{},onTestOpen=()=>{},openSettings=async()=>{throw Error('운영체제의 알림 설정을 직접 열어 주세요.');},prepare=async()=>{},onShown=()=>{},clock=Date.now,setTimer=setTimeout,clearTimer=clearTimeout,interval=30000}={}){
+ let scope='',cursor='',checkpoint=null,enabled=false,prepared=false,mode='mentions',connected=false,active=true,generation=0,working=null,timer=null,failures=0,message='',delivered=0,configuring=false;
+ let prefs=null,testNotice=null,testTimer=null,testSequence=0,testState={state:'idle',at:null};const seen=new Set(),requests=new Set(),notices=new Map();
  const status=()=>({supported:!!supported(),authenticated:!!scope,enabled,mode,connected,running:active,delivered,message,test:{...testState}});
- const closeNotice=()=>{const old=notice;notice=null;try{old?.close();}catch{}};
+ // 종류마다 최신 알림 하나만 화면에 둔다. 출동이 업무톡에 덮이지 않게.
+ const closeNotice=kind=>{for(const [key,old] of [...notices])if(kind===undefined||key===kind){notices.delete(key);try{old?.close();}catch{}}};
  function clearTest(){testSequence++;if(testTimer)clearTimer(testTimer);testTimer=null;const old=testNotice;testNotice=null;testState={state:'idle',at:null};try{old?.close();}catch{}}
  function cancel(clearScope){generation++;clearTest();if(timer)clearTimer(timer);timer=null;for(const req of requests)req.abort();requests.clear();working=null;cursor='';checkpoint=null;seen.clear();closeNotice();if(clearScope){scope='';enabled=false;mode='mentions';connected=false;delivered=0;message='직원 로그인 후 이 기기의 알림을 켤 수 있어요.';}}
  const origin=()=>{const value=getOrigin();try{const u=new URL(value);return !u.username&&!u.password&&u.origin===value&&(u.protocol==='https:'||value==='http://127.0.0.1:4180')&&isInternal(value+'/erp/home.html#today')?value:'';}catch{return '';}};
@@ -49,30 +66,40 @@ export function createDesktopNotifications({fetcher,getOrigin,isInternal,createN
   finally{clearTimer(timeout);requests.delete(abort);}
  }
  function schedule(quick=false){if(!active||!enabled)return;if(timer)clearTimer(timer);timer=setTimer(()=>{timer=null;refresh();},quick?1000:Math.min(300000,interval*2**Math.min(failures,4)));timer.unref?.();}
+ // 윈도우 알림은 시작 메뉴 바로가기(앱 ID 포함)가 있어야 뜬다. 기본 켬일 때도 한 번 확인한다. 실패해도 알림 시도는 계속.
+ function ensurePrepared(){if(prepared)return;prepared=true;Promise.resolve().then(prepare).catch(()=>{prepared=false;message='시작 메뉴의 GAON ERP 바로가기를 확인해 주세요. 알림이 안 보일 수 있어요.';});}
  const prefKey=()=>createHash('sha256').update(origin()+'|'+scope).digest('hex');
  async function openItem(item,expectedScope,epoch){
   if(!active||!enabled||epoch!==generation||scope!==expectedScope)return;
-  try{const result=await request('/api/gaon/push?messageId='+item.messageId,epoch);if(!result||epoch!==generation||scope!==expectedScope||!result.canOpen||result.identityId!==expectedScope.split(':')[1])return;
-   const deadline=item.kind==='work-deadline';if(deadline?result.workId!==item.workId:result.roomId!==item.roomId)return;
-   const url=origin()+'/erp/home.html'+(deadline?'#erp/work-orders/'+item.workId:'#erp/talk/'+item.roomId+'/'+item.messageId);if(!isInternal(url))return;await onOpen(url);closeNotice();
+  const kind=itemKind(item);
+  try{
+   let ok=false;
+   if(kind==='work-dispatch'||kind==='payment-return'||kind==='work-intake'){const result=await request('/api/gaon/push/inbox?open='+item.messageId,epoch);ok=!!result&&result.canOpen===true&&result.identityId===expectedScope.split(':')[1]&&result.kind===kind&&(kind==='payment-return'?result.paymentId===item.paymentId:result.workId===item.workId);}
+   else{const result=await request('/api/gaon/push?messageId='+item.messageId,epoch);ok=!!result&&result.canOpen===true&&result.identityId===expectedScope.split(':')[1]&&(kind==='work-deadline'?result.workId===item.workId:result.roomId===item.roomId);}
+   if(!ok||epoch!==generation||scope!==expectedScope)return;
+   const url=origin()+'/erp/home.html'+desktopNotificationRoute(item);if(!isInternal(url))return;await onOpen(url);closeNotice(kind);
   }catch{if(epoch===generation)message='알림의 업무 권한을 다시 확인해 주세요.';}
  }
  async function refresh(){
   if(!active)return status();if(working)return working;
   const epoch=generation;let more=false,attemptedResume=false,operation;
   operation=(async()=>{try{
-   const requestedMode=mode,query=new URLSearchParams({mode,deadlines:'1'});if(cursor&&enabled)query.set('cursor',cursor);else if(enabled&&checkpoint){attemptedResume=true;query.set('checkpoint',JSON.stringify(checkpoint));}
+   const requestedMode=mode,query=new URLSearchParams({mode,deadlines:'1',alerts:'2',intake:'1'});if(cursor&&enabled)query.set('cursor',cursor);else if(enabled&&checkpoint){attemptedResume=true;query.set('checkpoint',JSON.stringify(checkpoint));}
    const result=await request('/api/gaon/push/inbox?'+query,epoch);if(!result||epoch!==generation)return status();
-   if(!scopePattern.test(result.identityScope)||typeof result.cursor!=='string'||!result.cursor||result.cursor.length>4096||!Array.isArray(result.items)||result.items.length>100||result.items.some(item=>!idPattern.test(item?.messageId)||(item?.kind==='work-deadline'?!idPattern.test(item?.workId):item?.kind!==undefined&&item.kind!=='talk'||!idPattern.test(item?.roomId))))throw Error('response');
+   if(!scopePattern.test(result.identityScope)||typeof result.cursor!=='string'||!result.cursor||result.cursor.length>4096||!Array.isArray(result.items)||result.items.length>100||result.items.some(item=>!itemValid(item)))throw Error('response');
    const nextCheckpoint=result.checkpoint;
    if(nextCheckpoint!==undefined&&(!nextCheckpoint||typeof nextCheckpoint!=='object'||Array.isArray(nextCheckpoint)||Object.keys(nextCheckpoint).sort().join(',')!=='createdAt,id,scope'||nextCheckpoint.scope!==result.identityScope+':'+requestedMode||!idPattern.test(nextCheckpoint.id)||typeof nextCheckpoint.createdAt!=='string'||nextCheckpoint.createdAt.length>40||!Number.isFinite(Date.parse(nextCheckpoint.createdAt))))throw Error('response');
    failures=0;connected=true;
-   if(scope!==result.identityScope){closeNotice();seen.clear();scope=result.identityScope;cursor=result.cursor;checkpoint=nextCheckpoint||null;delivered=0;prefs??=await preferences.read();if(epoch!==generation)return status();const value=prefs[prefKey()];enabled=value?.enabled===true&&!!supported();mode=value?.mode==='all'?'all':'mentions';if(mode!==requestedMode){cursor='';checkpoint=null;more=true;}message=enabled?'앱 실행 중 업무 알림을 받습니다.':'이 기기의 업무 알림이 꺼져 있어요.';return status();}
+   if(scope!==result.identityScope){closeNotice();seen.clear();scope=result.identityScope;cursor=result.cursor;checkpoint=nextCheckpoint||null;delivered=0;prefs??=await preferences.read();if(epoch!==generation)return status();const value=prefs[prefKey()];
+    // 2026-11-04 설치형 앱은 기본으로 알림을 켠다. 직원이 끈 기록이 있을 때만 꺼 둔다.
+    enabled=(value?value.enabled===true:true)&&!!supported();if(enabled)ensurePrepared();mode=value?.mode==='all'?'all':'mentions';if(mode!==requestedMode){cursor='';checkpoint=null;more=true;}message=enabled?'앱 실행 중 업무 알림을 받습니다.':'이 기기의 업무 알림이 꺼져 있어요.';return status();}
    cursor=result.cursor;checkpoint=nextCheckpoint||null;more=result.hasMore===true;
    if(result.recovered===true)message=result.recoveryTruncated===true?'알림 연결을 복구했어요. 최근 24시간 이전의 업무는 업무톡에서 확인해 주세요.':'연결 중 놓친 업무 알림을 다시 확인했어요.';
    if(!enabled)return status();
    const fresh=result.items.filter(item=>!seen.has(item.messageId));for(const item of fresh)seen.add(item.messageId);while(seen.size>500)seen.delete(seen.values().next().value);
-   if(fresh.length){const item=fresh.at(-1),expectedScope=scope;closeNotice();const current=createNotification(item.kind==='work-deadline'?{...desktopNotificationOptions,body:'담당 업무의 마감이 가까워졌습니다. 앱에서 확인해 주세요.'}:desktopNotificationOptions,{click:()=>openItem(item,expectedScope,epoch),show:()=>{if(epoch===generation){delivered++;message='이 기기로 업무 알림이 전달됐어요.';}},failed:()=>{if(epoch===generation)message='운영체제의 GAON ERP 알림 허용을 확인해 주세요.';},close:()=>{if(notice===current)notice=null;}});notice=current;current.show();}
+   // 종류별로 마지막 것 하나씩 띄운다.
+   const latest=new Map();for(const item of fresh)latest.set(itemKind(item),item);
+   for(const [kind,item] of latest){const expectedScope=scope;closeNotice(kind);const current=createNotification(desktopNotificationKinds[kind],{click:()=>openItem(item,expectedScope,epoch),show:()=>{if(epoch===generation){delivered++;message='이 기기로 업무 알림이 전달됐어요.';try{onShown(kind);}catch{}}},failed:()=>{if(epoch===generation)message='운영체제의 GAON ERP 알림 허용을 확인해 주세요.';},close:()=>{if(notices.get(kind)===current)notices.delete(kind);}});notices.set(kind,current);current.show();}
    return status();
   }catch(error){if(epoch===generation){connected=false;failures++;if(error.status===400){cursor='';if(attemptedResume)checkpoint=null;else if(checkpoint)more=true;}message='알림 연결을 다시 확인하고 있어요. 잠시 후 재시도합니다.';}return status();}
   finally{if(working===operation){working=null;if(epoch===generation)schedule(more);}}})();working=operation;return operation;
@@ -84,7 +111,7 @@ export function createDesktopNotifications({fetcher,getOrigin,isInternal,createN
   if(!scope||!connected)throw Error('직원 로그인과 서버 연결을 먼저 확인해 주세요.');
   if(!enabled||!supported())throw Error('이 기기의 업무 알림을 먼저 켜 주세요.');
   const expectedScope=scope,epoch=generation;
-  await prepare();if(epoch!==generation||scope!==expectedScope||!active||!enabled)throw Error('로그인 계정이나 알림 설정이 바뀌었습니다. 다시 확인해 주세요.');
+  await prepare();prepared=true;if(epoch!==generation||scope!==expectedScope||!active||!enabled)throw Error('로그인 계정이나 알림 설정이 바뀌었습니다. 다시 확인해 주세요.');
   clearTest();const serial=testSequence;
   const valid=()=>active&&enabled&&epoch===generation&&scope===expectedScope&&serial===testSequence;
   const setState=state=>{if(valid())testState={state,at:new Date(clock()).toISOString()};};
@@ -110,7 +137,7 @@ export function createDesktopNotifications({fetcher,getOrigin,isInternal,createN
   if(!value||typeof value.enabled!=='boolean'||!['mentions','all'].includes(value.mode)||Object.keys(value).some(k=>!['enabled','mode'].includes(k)))throw Error('알림 설정을 확인해 주세요.');
   if(configuring)throw Error('알림 설정 저장 중입니다.');configuring=true;
   try{if(!scope)await refresh();if(!scope)throw Error('직원 로그인 후 알림을 설정해 주세요.');if(value.enabled&&!supported())throw Error('현재 운영체제에서 앱 알림을 사용할 수 없습니다.');
-   const expectedScope=scope,epoch=generation;if(value.enabled)await prepare();if(epoch!==generation||scope!==expectedScope)throw Error('로그인 계정이 변경됐습니다. 다시 설정해 주세요.');prefs??=await preferences.read();const updated={...prefs,[prefKey()]:{enabled:value.enabled,mode:value.mode}};
+   const expectedScope=scope,epoch=generation;if(value.enabled){await prepare();prepared=true;}if(epoch!==generation||scope!==expectedScope)throw Error('로그인 계정이 변경됐습니다. 다시 설정해 주세요.');prefs??=await preferences.read();const updated={...prefs,[prefKey()]:{enabled:value.enabled,mode:value.mode}};
    // Limit old, non-sensitive preferences; no session, key, message or financial data is persisted.
    for(const key of Object.keys(updated).slice(0,Math.max(0,Object.keys(updated).length-100)))delete updated[key];
    await preferences.write(updated);if(epoch!==generation||scope!==expectedScope)throw Error('로그인 계정이 변경됐습니다. 다시 설정해 주세요.');prefs=updated;cancel(false);enabled=value.enabled;mode=value.mode;message=enabled?'앱 실행 중 업무 알림을 받습니다.':'이 기기의 업무 알림이 꺼져 있어요.';
