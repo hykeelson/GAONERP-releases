@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       verify_upgrade:
-        description: Verify the live upgrade from 0.3.5 to the published release
+        description: Verify the live upgrade from 0.3.6 to the published release
         type: boolean
         default: false
 permissions:
@@ -78,23 +78,23 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Verify published update from installed 0.3.5
+      - name: Verify published update from installed 0.3.6
         if: inputs.verify_upgrade
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $expected = ((Get-Content latest.yml | Select-String '^version: (.+)$').Matches[0].Groups[1].Value).Trim()
-          if ([version]$expected -le [version]'0.3.5') { throw 'Invalid upgrade target' }
-          $old = Join-Path $env:RUNNER_TEMP 'GAON-035.exe'
+          if ([version]$expected -le [version]'0.3.6') { throw 'Invalid upgrade target' }
+          $old = Join-Path $env:RUNNER_TEMP 'GAON-036.exe'
           $dir = Join-Path $env:LOCALAPPDATA 'Programs/GAON ERP'
-          Invoke-WebRequest -Uri 'https://github.com/hykeelson/GAONERP-releases/releases/download/v0.3.5/GAON-ERP-Setup-x64.exe' -OutFile $old
+          Invoke-WebRequest -Uri 'https://github.com/hykeelson/GAONERP-releases/releases/download/v0.3.6/GAON-ERP-Setup-x64.exe' -OutFile $old
           $p = Start-Process $old -ArgumentList '/S' -Wait -PassThru
           $installed = @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Filter 'GAON ERP.exe' -Recurse)
           if ($installed.Count -ne 1) { throw 'Default GAON install location not found' }
           $dir = $installed[0].DirectoryName
           if ($p.ExitCode -ne 0) { throw 'Baseline install failed' }
           $exe = Join-Path $dir 'GAON ERP.exe'
-          if ((Get-Item $exe).VersionInfo.ProductVersion.TrimEnd() -notin '0.3.5','0.3.5.0') { throw 'Wrong baseline' }
+          if ((Get-Item $exe).VersionInfo.ProductVersion.TrimEnd() -notin '0.3.6','0.3.6.0') { throw 'Wrong baseline' }
           Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
           $client = Start-Process $exe -PassThru
           $root = [Windows.Automation.AutomationElement]::RootElement
@@ -153,7 +153,7 @@ jobs:
             foreach ($win in $root.FindAll([Windows.Automation.TreeScope]::Children,$byPid)) {
               $b=$win.FindFirst([Windows.Automation.TreeScope]::Descendants,$byButton)
               if (!$b) { continue }
-              Write-Host 'Installed 0.3.5 offered its downloaded update'
+              Write-Host 'Installed 0.3.6 offered its downloaded update'
               $shell=New-Object -ComObject WScript.Shell
               if (!$shell.AppActivate('GAON ERP 업데이트')) { continue }
               $shell.SendKeys('{ENTER}'); $clicked=$true; break
@@ -168,7 +168,7 @@ jobs:
             }
             if (!(Test-Path $exe) -or (Get-Item $exe).VersionInfo.ProductVersion -notin $expected,($expected+'.0')) { continue }
             $new = @(Get-Process -Name 'GAON ERP' -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $client.Id -and $_.MainWindowHandle -ne 0 -and $_.Path -eq $exe })
-            if ($new.Count) { Write-Host "Verified published 0.3.5 -> $expected and relaunched GUI"; exit 0 }
+            if ($new.Count) { Write-Host "Verified published 0.3.6 -> $expected and relaunched GUI"; exit 0 }
           }
           Get-Process | Where-Object { $_.ProcessName -match 'GAON|setup' -or $_.MainWindowTitle -match 'GAON' } | Format-Table Id,ProcessName,MainWindowTitle
           throw 'New version and relaunched window not verified'

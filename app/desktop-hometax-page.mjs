@@ -90,8 +90,14 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
  if(op==='rows'&&page>1&&!all('[aria-current=page],.w2pageList_selected,.w2page_link.active,[class*="paging"] .active').some(e=>parseInt(e.textContent,10)===page))return {};
  if(op!=='rows'||!globalThis[Symbol.for('gaon.hometax.result')]?.changed)return {};
  const readCounts=table=>{
-   const cardCount=card&&document.getElementById('mf_txppWframe_txtTotal');
-   if(cardCount&&visible(cardCount)&&/^[\d,]+$/.test(trim(cardCount.textContent)))return [Number(trim(cardCount.textContent).replaceAll(',',''))];
+   // The official invoice pager has a numeric span, separate from the invoice grid.
+   const totalLabel=document.getElementById('mf_txppWframe_txtTotal');
+   const pager=document.getElementById('mf_txppWframe_grpNavi');
+   if((card&&totalLabel)||(table===liveGrid&&pager)){
+     if(!visible(totalLabel)||(!card&&!pager.contains(totalLabel)))return [];
+     const raw=trim(totalLabel.textContent);
+     return /^(?:0|[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)$/.test(raw)?[Number(raw.replaceAll(',',''))]:[];
+   }
    const format=/^(?:총\s*(?:조회\s*)?(?:건수)?|조회\s*건수|전체\s*건수)\s*[:：]?\s*([\d,]+)\s*건(?:\s|$)/;
    for(let box=table.parentElement;box;box=box.parentElement){
      const counts=[];
