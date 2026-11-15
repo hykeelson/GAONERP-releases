@@ -25,8 +25,11 @@ const file=join(dir,'hometax-daily.json');
 const stub=homeTaxDailyImport({file});stub.manual(identity,business);stub.enable(identity,business);
 let db,main,shown=0,reads=0;
 const results=[];
-try{
- await app.whenReady();
+// Let Electron finish loading its ES module entry point before waiting for ready.
+app.whenReady().then(async()=>{
+ console.log('Electron ready: loading the temporary card ledger');
+ const watchdog=setTimeout(()=>{console.error('Windows tray fixture deadline');app.exit(1);},220000);
+ try{
  db=new DatabaseSync(join(dir,'temporary-ledger.sqlite'));
  db.exec('create table cards(month text, row_id text, primary key(month,row_id))');
  const profile=homeTaxProfileStore(session,join(dir,'hometax-profile.json')).acquire(identity.org,identity.actor);
@@ -66,6 +69,7 @@ try{
    else win.on('show',()=>shown++);
  });
  await import('../desktop-client-main.mjs');
+ console.log('GAON main process loaded');
  await until(()=>main?.webContents.getURL().startsWith(desktopCloudOrigin)&&main.isVisible(),30000);
  assert.ok(Menu.getApplicationMenu().items[0].submenu.items.some(i=>i.label.includes('카드 자동 수집')));
  main.close();assert.ok(!main.isVisible()&&!main.isDestroyed());
@@ -80,4 +84,5 @@ try{
  assert.equal(shown,0);assert.ok(reads>=2);
  console.log(JSON.stringify({platform:process.platform,trayHidden:!main.isVisible(),authenticationWindows:shown,month:second.month,first:results[0],second:results[1],stored:2}));
  db.close();app.exit(0);
-}catch(e){console.error(e.stack);app.exit(1);}
+ }catch(e){console.error(e.stack);app.exit(1);}finally{clearTimeout(watchdog);}
+});
