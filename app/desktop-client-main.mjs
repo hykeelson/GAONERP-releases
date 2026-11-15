@@ -1,4 +1,4 @@
-import {homeTaxProfileStore} from './desktop-hometax-session.mjs';
+import {homeTaxDailyImport,homeTaxProfileStore} from './desktop-hometax-session.mjs';
 import {openHomeTax} from './desktop-hometax.mjs';
 import {desktopCloudOrigin,createDesktopCredentialStore,createDesktopCloudSession,desktopCloudReply} from './desktop-cloud-session.mjs';
 import {app,BrowserWindow,Menu,Tray,dialog,ipcMain,shell,session,Notification,safeStorage} from 'electron';
@@ -17,7 +17,7 @@ const partition='persist:gaon-erp-client';
 // 첫 화면이 읽어도 되는 앱 안 파일. 여기에 없는 파일은 막힌다 — 2026-10-28 빛줄기·로고·글꼴이 빠져 첫 화면이 멈췄던 일 (desktop-release-package.test.mjs 가 대조).
 const setupAssets=['desktop-client-setup.html','desktop-client-setup.css','desktop-client-setup.mjs','desktop-login-motion.mjs','desktop-gaon-symbol.svg','desktop-fonts/Pretendard-Regular.otf','desktop-fonts/Pretendard-Medium.otf','desktop-fonts/Pretendard-Bold.ttf'];
 const setupAssetURLs=new Set(setupAssets.map(file=>pathToFileURL(path.join(here,file)).href));
-let taxProfiles,updater,window,manualWindow,serverOrigin='',connected=false,signedIn=false,loginBusy=false,quitting=false,statusMessage='',locationGranted=false,notifications,connectionBusy=false,cloud,cloudLogin=null,cloudReturn='/erp/home.html#today';
+let taxProfiles,taxDaily,taxTimer,updater,window,manualWindow,serverOrigin='',connected=false,signedIn=false,loginBusy=false,quitting=false,statusMessage='',locationGranted=false,notifications,connectionBusy=false,cloud,cloudLogin=null,cloudReturn='/erp/home.html#today';
 if(!app.isPackaged&&process.env.GAON_DESKTOP_TEST_USER_DATA)app.setPath('userData',path.resolve(process.env.GAON_DESKTOP_TEST_USER_DATA));
 if(!app.requestSingleInstanceLock())app.quit();
 else{
@@ -26,7 +26,7 @@ else{
  app.on('activate',()=>window?focus():start().catch(fail));
  // 2026-11-04 창을 닫아도 작업표시줄 알림 영역(트레이)에 남아 알림을 받는다. 트레이의 「종료」로만 끈다.
  app.on('window-all-closed',()=>{if(quitting)app.quit();});
- app.on('before-quit',()=>{quitting=true;updater?.stop();cloud?.cancel();cloudLogin?.reject(Error('앱을 종료했습니다.'));notifications?.stop();});
+ app.on('before-quit',()=>{quitting=true;clearInterval(taxTimer);updater?.stop();cloud?.cancel();cloudLogin?.reject(Error('앱을 종료했습니다.'));notifications?.stop();});
  app.whenReady().then(start).catch(fail);
 }
 const ses=()=>session.fromPartition(partition);
@@ -47,13 +47,61 @@ async function start(){
  // 2026-10-28 사용자 결정: 서버 주소를 고르는 기능은 없앴다. 항상 회사 서버에 붙고 Google 직원 로그인만 쓴다 (맥·윈도우 같은 코드).
  serverOrigin=desktopCloudOrigin;
  taxProfiles=homeTaxProfileStore(session,path.join(app.getPath('userData'),'hometax-profile.json'));
- cloud=createDesktopCloudSession({store:createDesktopCredentialStore({file:path.join(app.getPath('userData'),'cloud-session.bin'),safeStorage}),fetcher:(...args)=>ses().fetch(...args),onUnauthorized:()=>{signedIn=false;locationGranted=false;notifications?.reset();taxProfiles.clear().catch(()=>{});}});
+ cloud=createDesktopCloudSession({store:createDesktopCredentialStore({file:path.join(app.getPath('userData'),'cloud-session.bin'),safeStorage}),fetcher:(...args)=>ses().fetch(...args),onUnauthorized:()=>{signedIn=false;locationGranted=false;notifications?.reset();taxDaily?.clear();taxProfiles.clear().catch(()=>{});}});
  if(app.isPackaged&&process.platform==='win32')app.setAsDefaultProtocolClient('studio.keelson.gaon');
+ if(process.platform==='win32')startTaxDaily();
  configureSession();configureNotifications();configureIPC();setMenu();createWindow();
  updater=startDesktopUpdater({app,dialog,getWindow:()=>window});
  if(!app.isPackaged&&process.env.GAON_DESKTOP_SMOKE==='1')return showSetup('검수용 첫 실행');
  try{await verifyServer();signedIn=await verifySession();if(signedIn)return openERP();return showSetup('등록된 직원 계정으로 로그인해 주세요.');}
  catch(error){return showSetup(error.message);}
+}
+async function taxAccess(){
+ const response=await cloud.request({path:'/api/gaon/vat?hometax=access'});
+ if(!response.ok)throw Object.assign(Error(response.status===403?'전사 재무 권한을 확인하세요.':'가온 재무 서버 연결을 확인하세요.'),{code:response.status===403?'HT_PERMISSION':''});
+ const {actor,org}=await response.json();
+ if(typeof actor!=='string'||!actor||typeof org!=='string'||!org)throw Error('재무 권한 확인에 실패했습니다.');
+ return {actor,org};
+}
+function startTaxDaily(){
+ taxDaily=homeTaxDailyImport({
+  file:path.join(app.getPath('userData'),'hometax-daily.json'),access:taxAccess,
+  collect:({org,actor},registration,month)=>openHomeTax({BrowserWindow,session,parent:window,registration,month,profile:taxProfiles.acquire(org,actor),background:true}),
+  async commit({actor,org},month,data){
+   const query=new URLSearchParams({hometax:'cards',business:data.registration,month});
+   const reply=await cloud.request({path:'/api/gaon/vat?'+query,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actor,org,...data})});
+   if(!reply.ok)throw Object.assign(Error('홈택스 자료 저장을 확인하세요.'),{code:reply.status===403?'HT_PERMISSION':reply.status===409?'HT_CONFLICT':''});
+   return reply.json();
+  },
+  onPause:reason=>{if(Notification.isSupported())new Notification({title:'가온 홈택스 카드 자동 수집',body:reason+' 후 홈택스 자료를 한 번 직접 가져오세요.'}).show();}
+ });
+ taxTimer=setInterval(()=>{if(signedIn&&!quitting)taxDaily.tick().catch(()=>{});},60000);
+}
+async function showTaxDailySettings(){
+ if(!signedIn)throw Error('가온 직원 계정으로 로그인하세요.');
+ const identity=await taxAccess(),state=taxDaily.settings(identity);
+ const last=state.last;
+ const detail=state.enabled?[
+   state.paused?'확인 필요 · '+state.paused:state.retryAt?'일시 지연 · 자동으로 다시 시도합니다.':'이 PC에서 매일 지난달 사업용 카드를 확인합니다.',
+   last?last.day+' 수집 · '+last.month+' 신규 '+last.added+'건, 중복 '+last.duplicate+'건':'아직 완료된 자동 수집이 없습니다.'
+ ].join('\n'):'가온이 실행 중이면 지난달 사업용 카드 내역을 매일 확인합니다. 처음 한 번 홈택스에서 회사 사업장을 확인하세요.';
+ const buttons=state.enabled?['닫기','자동 수집 끄기',...(state.paused?['다시 연결']:[])]:['닫기','카드 연결'];
+ const choice=await dialog.showMessageBox(window,{type:'info',message:'홈택스 카드 자동 수집 '+(state.enabled?'켜짐':'꺼짐'),detail,buttons,defaultId:0,cancelId:0});
+ if(!choice.response)return;
+ async function sameEmployee(){
+   const current=await taxAccess();
+   if(current.actor!==identity.actor||current.org!==identity.org)throw Error('직원 로그인이 변경됐습니다.');
+ }
+ await sameEmployee();
+ if(state.enabled&&choice.response===1){taxDaily.disable();return;}
+ const today=new Date(Date.now()+9*3600000);
+ const month=new Date(Date.UTC(today.getUTCFullYear(),today.getUTCMonth()-1,1)).toISOString().slice(0,7);
+ const data=await openHomeTax({BrowserWindow,session,parent:window,registration:state.enabled?state.registration:'',month,cardOnly:true,profile:taxProfiles.acquire(identity.org,identity.actor)});
+ const confirm=await dialog.showMessageBox(window,{type:'question',message:'이 사업장의 카드 자동 수집을 켤까요?',detail:'사업자등록번호 '+data.registration+' · '+month+' 카드 '+data.groups.card.length+'건',buttons:['취소','자동 수집 켜기'],defaultId:0,cancelId:0});
+ if(confirm.response!==1)return;
+ await sameEmployee();
+ taxDaily.manual(identity,data.registration);taxDaily.enable(identity,data.registration);await taxDaily.tick();
+
 }
 function createWindow(){
  window=new BrowserWindow({title:'GAON ERP',width:1180,height:820,minWidth:880,minHeight:600,show:false,backgroundColor:'#eef3f7',webPreferences:{...clientWebPreferences,partition,preload:path.join(here,'desktop-client-preload.cjs')}});
@@ -74,13 +122,13 @@ function configureIPC(){
  const cloudSender=event=>{let url;try{url=new URL(event.senderFrame?.url);}catch{}if(event.sender!==window?.webContents||event.senderFrame!==window.webContents.mainFrame||serverOrigin!==desktopCloudOrigin||url?.origin!==desktopCloudOrigin||url.pathname!=='/erp/home.html')throw Error('허용되지 않은 업무 화면입니다.');};
  ipcMain.handle('gaon-client:hometax',async(event,{registration,month})=>{
   cloudSender(event);
-  const access=async()=>{const r=await cloud.request({path:'/api/gaon/vat?hometax=access'});if(!r.ok)throw Error('전사 재무 권한을 확인하세요.');const {actor,org}=await r.json();if(typeof actor!=='string'||typeof org!=='string')throw Error('재무 권한 확인에 실패했습니다.');return {actor,org};};
-  const {actor,org}=await access();
+  const {actor,org}=await taxAccess();
   const collected=await openHomeTax({BrowserWindow,session,parent:window,registration,month,profile:taxProfiles.acquire(org,actor)});
-  cloudSender(event);const current=await access();if(actor!==current.actor||org!==current.org)throw Error('로그인한 직원이 변경됐습니다.');
+  cloudSender(event);const current=await taxAccess();if(actor!==current.actor||org!==current.org)throw Error('로그인한 직원이 변경됐습니다.');
+  taxDaily?.manual(current,collected.registration);
   return {actor,...collected};
  });
- ipcMain.handle('gaon-cloud:request',async(event,input)=>{cloudSender(event);try{if(input?.path==='/api/gaon/auth/logout')await taxProfiles.clear();const response=await cloud.request(input);if(input?.path==='/api/gaon/auth/logout'&&response.ok){notifications?.reset();await ses().clearStorageData({origin:desktopCloudOrigin});}return await desktopCloudReply(response);}catch(error){return desktopCloudReply(Response.json({error:error.status?error.message:'업무 연결을 확인하지 못했습니다.'},{status:[400,401,403,405,413].includes(error.status)?error.status:503}));}});
+ ipcMain.handle('gaon-cloud:request',async(event,input)=>{cloudSender(event);try{if(input?.path==='/api/gaon/auth/logout'){taxDaily?.clear();await taxProfiles.clear();}const response=await cloud.request(input);if(input?.path==='/api/gaon/auth/logout'&&response.ok){notifications?.reset();await ses().clearStorageData({origin:desktopCloudOrigin});}return await desktopCloudReply(response);}catch(error){return desktopCloudReply(Response.json({error:error.status?error.message:'업무 연결을 확인하지 못했습니다.'},{status:[400,401,403,405,413].includes(error.status)?error.status:503}));}});
  ipcMain.handle('gaon-cloud:login',async(event,returnTo)=>{cloudSender(event);cloudReturn=safeCloudDesktopReturn(returnTo);await beginLogin();return {signedIn:true};});
  ipcMain.handle('gaon-client:state',event=>{setupSender(event);return {serverOrigin,connected,signedIn,message:statusMessage||(connected?(signedIn?'직원 로그인이 확인됐습니다.':'등록된 직원 계정으로 로그인해 주세요.'):'회사 서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.')};});
  ipcMain.handle('gaon-client:reconnect',async event=>{setupSender(event);return updateConnection(async()=>{await verifyServer();signedIn=await sessionVerified(serverOrigin);statusMessage=signedIn?'직원 로그인이 확인됐습니다.':'등록된 직원 계정으로 로그인해 주세요.';return {serverOrigin,connected,signedIn,message:statusMessage};});});
@@ -144,7 +192,7 @@ async function openManual(){
  const file=path.join(app.getAppPath(),'app/desktop-client-manual.html');if(!await access(file).then(()=>true,()=>false)){await dialog.showMessageBox(window,{title:'빠른 사용 안내',message:'1. 기본 GAON 서버 주소를 확인합니다.\n2. 직원 로그인을 누르고 기본 브라우저에서 로그인합니다.\n3. 로그인 완료 후 앱으로 돌아오면 ERP가 열립니다.',detail:'서버 주소 변경이 필요하면 도움말 메뉴에서 연결 설정을 여세요.'});return;}
  if(manualWindow&&!manualWindow.isDestroyed()){manualWindow.focus();return;}manualWindow=new BrowserWindow({title:'GAON ERP 빠른 사용 안내',width:820,height:720,parent:window,webPreferences:clientWebPreferences});await manualWindow.loadFile(file);
 }
-function setMenu(){Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'파일',submenu:[{label:'직원 로그인',click:()=>beginLogin().catch(error=>dialog.showMessageBox({type:'warning',message:error.message}))},{label:'로그인 화면',click:()=>showSetup()},{type:'separator'},{role:'quit',label:'종료'}]},{label:'보기',submenu:[{role:'reload',label:'새로고침'},{role:'resetZoom',label:'실제 크기'},{role:'zoomIn',label:'확대'},{role:'zoomOut',label:'축소'},{role:'togglefullscreen',label:'전체 화면'}]},{label:'도움말',submenu:[{label:'가온봇 경량 분류 검수',type:'checkbox',click:toggleDeviceReview},{type:'separator'},{label:'빠른 사용 안내',click:openManual},{label:'브라우저에서 열기',click:()=>{if(serverOrigin&&signedIn)shell.openExternal(serverOrigin+'/erp/home.html#today');}}]}]));}
+function setMenu(){Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'파일',submenu:[...(taxDaily?[{label:'홈택스 카드 자동 수집 설정…',click:()=>showTaxDailySettings().catch(e=>dialog.showMessageBox({type:'warning',message:e.message}))}]:[]),{label:'직원 로그인',click:()=>beginLogin().catch(error=>dialog.showMessageBox({type:'warning',message:error.message}))},{label:'로그인 화면',click:()=>showSetup()},{type:'separator'},{role:'quit',label:'종료'}]},{label:'보기',submenu:[{role:'reload',label:'새로고침'},{role:'resetZoom',label:'실제 크기'},{role:'zoomIn',label:'확대'},{role:'zoomOut',label:'축소'},{role:'togglefullscreen',label:'전체 화면'}]},{label:'도움말',submenu:[{label:'가온봇 경량 분류 검수',type:'checkbox',click:toggleDeviceReview},{type:'separator'},{label:'빠른 사용 안내',click:openManual},{label:'브라우저에서 열기',click:()=>{if(serverOrigin&&signedIn)shell.openExternal(serverOrigin+'/erp/home.html#today');}}]}]));}
 
 async function toggleDeviceReview(item){
  const desired=item.checked;

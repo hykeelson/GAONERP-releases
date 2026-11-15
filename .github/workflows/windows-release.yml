@@ -18,6 +18,11 @@ jobs:
         run: npm test
       - name: Windows first-launch and preload IPC test
         run: npm run smoke
+      - name: Windows tray card collection twice with a temporary ledger
+        shell: pwsh
+        run: |
+          & node_modules/electron/dist/electron.exe app/test/desktop-card-tray-check.mjs | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw 'Card tray verification failed' }
       - name: Build x64 installer and ZIP
         run: npm run build:win
         env:
