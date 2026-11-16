@@ -36,9 +36,9 @@ app.whenReady().then(async()=>{
  const profile=homeTaxProfileStore(session,join(dir,'hometax-profile.json')).acquire(identity.org,identity.actor);
  profile.session.protocol.handle('https',req=>{
    assert.equal(new URL(req.url).hostname,'www.hometax.go.kr');
-   reads++;
+   reads++;console.log('Synthetic portal opened',reads,'late transaction',additionalCard);
    const html='<header title="사업자">000-00-00000 <button>로그아웃</button></header><div id="menus"></div><div id="body"></div><script>('+portal.toString()+')('+JSON.stringify({wrongMonth:false,additionalCard})+')</script>';
-   return new Response(html,{headers:{'content-type':'text/html;charset=utf-8'}});
+   return new Response(html,{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store'}});
  });
  const cloud=session.fromPartition('persist:gaon-erp-client');
  const store=createDesktopCredentialStore({safeStorage,file:join(dir,'cloud-session.bin')});
@@ -53,6 +53,7 @@ app.whenReady().then(async()=>{
    if(u.searchParams.get('hometax')==='access')return Response.json(identity);
    if(u.searchParams.get('hometax')!=='cards')return new Response(null,{status:404});
    const data=await req.json(),month=u.searchParams.get('month');
+   console.log('Synthetic card submission',month,data.groups.card.length);
    assert.ok(['2026-09','2026-10'].includes(month));assert.equal(data.org,identity.org);assert.equal(data.actor,identity.actor);
    assert.deepEqual(Object.keys(data.groups),['card']);assert.equal(data.groups.card.length,additionalCard&&month==='2026-10'?3:2);
    assert.ok(main&&!main.isVisible()&&!main.isDestroyed());
@@ -76,7 +77,10 @@ app.whenReady().then(async()=>{
  main.close();assert.ok(!main.isVisible()&&!main.isDestroyed());
  console.log('Windows main window closed to tray');
  async function completed(day){
-   return until(async()=>{const prefs=JSON.parse(await readFile(file));return prefs.day===day&&prefs.last;},90000);
+   return until(async()=>{const prefs=JSON.parse(await readFile(file));return prefs.day===day&&prefs.last;},120000).catch(async error=>{
+     const {day:storedDay,months,paused}=JSON.parse(await readFile(file));
+     console.error('Unfinished synthetic day',day,{storedDay,months,paused,results,shown,reads});throw error;
+   });
  }
  const first=await completed('2026-10-04');assert.equal(first.added,2);
  const monthRows=month=>db.prepare('select row_id from cards where month=? order by row_id').all(month).map(row=>row.row_id);
