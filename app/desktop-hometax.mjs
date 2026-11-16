@@ -34,7 +34,12 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
      business=await waitFor(async()=>{const n=await selected();if(n&&(!registration||registration===n))return n;if(++checks===7)await onChooseBusiness();return '';},'홈택스에서 사업장을 확인할 수 없습니다.',90000);
      await onBusiness(business);await onStage('card');
    }
-   await waitFor(async()=>(await step('query',kind)).some(r=>r.ready),'조회 월이나 매입·매출 선택 상태를 확인할 수 없습니다.');
+   await waitFor(async()=>{
+     const replies=await step('query',kind);
+     if(replies.some(r=>r.ready))return true;
+     if(replies.some(r=>r.monthUnavailable))throw Object.assign(Error('홈택스가 해당 조회 월을 아직 제공하지 않습니다.'),{code:'HT_MONTH_UNAVAILABLE'});
+     return false;
+   },'조회 월이나 매입·매출 선택 상태를 확인할 수 없습니다.');
    const rows=[];let expected;
    for(let page=1;page<=1000;page++){
      let issue='';

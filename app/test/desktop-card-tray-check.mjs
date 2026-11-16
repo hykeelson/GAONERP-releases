@@ -25,10 +25,11 @@ const file=join(dir,'hometax-daily.json');
 const stub=homeTaxDailyImport({file});stub.manual(identity,business);stub.enable(identity,business);
 let db,main,shown=0,reads=0;
 const results=[];
+let additionalCard=false;
 // Let Electron finish loading its ES module entry point before waiting for ready.
 app.whenReady().then(async()=>{
  console.log('Electron ready: loading the temporary card ledger');
- const watchdog=setTimeout(()=>{console.error('Windows tray fixture deadline');app.exit(1);},220000);
+ const watchdog=setTimeout(()=>{console.error('Windows tray fixture deadline');app.exit(1);},260000);
  try{
  db=new DatabaseSync(join(dir,'temporary-ledger.sqlite'));
  db.exec('create table cards(month text, row_id text, primary key(month,row_id))');
@@ -36,7 +37,7 @@ app.whenReady().then(async()=>{
  profile.session.protocol.handle('https',req=>{
    assert.equal(new URL(req.url).hostname,'www.hometax.go.kr');
    reads++;
-   const html='<header title="사업자">000-00-00000 <button>로그아웃</button></header><div id="menus"></div><div id="body"></div><script>('+portal.toString()+')({wrongMonth:false})</script>';
+   const html='<header title="사업자">000-00-00000 <button>로그아웃</button></header><div id="menus"></div><div id="body"></div><script>('+portal.toString()+')('+JSON.stringify({wrongMonth:false,additionalCard})+')</script>';
    return new Response(html,{headers:{'content-type':'text/html;charset=utf-8'}});
  });
  const cloud=session.fromPartition('persist:gaon-erp-client');
@@ -52,8 +53,8 @@ app.whenReady().then(async()=>{
    if(u.searchParams.get('hometax')==='access')return Response.json(identity);
    if(u.searchParams.get('hometax')!=='cards')return new Response(null,{status:404});
    const data=await req.json(),month=u.searchParams.get('month');
-   assert.equal(month,'2026-09');assert.equal(data.org,identity.org);assert.equal(data.actor,identity.actor);
-   assert.deepEqual(Object.keys(data.groups),['card']);assert.equal(data.groups.card.length,2);
+   assert.ok(['2026-09','2026-10'].includes(month));assert.equal(data.org,identity.org);assert.equal(data.actor,identity.actor);
+   assert.deepEqual(Object.keys(data.groups),['card']);assert.equal(data.groups.card.length,additionalCard&&month==='2026-10'?3:2);
    assert.ok(main&&!main.isVisible()&&!main.isDestroyed());
    assert.ok(BrowserWindow.getAllWindows().every(w=>!w.isVisible()));
    const occurrences=new Map();let added=0;
@@ -62,7 +63,7 @@ app.whenReady().then(async()=>{
      occurrences.set(value,ordinal);
      added+=Number(db.prepare('insert or ignore into cards values(?,?)').run(month,value+'#'+ordinal).changes);
    }
-   const result={added,duplicate:data.groups.card.length-added};results.push(result);return Response.json(result);
+   const result={added,duplicate:data.groups.card.length-added};results.push({month,...result});return Response.json(result);
  });
  app.on('browser-window-created',(_event,win)=>{
    if(!main)main=win;
@@ -75,14 +76,25 @@ app.whenReady().then(async()=>{
  main.close();assert.ok(!main.isVisible()&&!main.isDestroyed());
  console.log('Windows main window closed to tray');
  async function completed(day){
-   return until(async()=>{const prefs=JSON.parse(await readFile(file));return prefs.last?.day===day&&prefs.last;},90000);
+   return until(async()=>{const prefs=JSON.parse(await readFile(file));return prefs.day===day&&prefs.last;},90000);
  }
  const first=await completed('2026-10-04');assert.equal(first.added,2);
+ const monthRows=month=>db.prepare('select row_id from cards where month=? order by row_id').all(month).map(row=>row.row_id);
+ const initial=monthRows('2026-10'),previous=monthRows('2026-09');
+ assert.equal(initial.length,2);assert.equal(previous.length,2);
+ additionalCard=true;
  simulated+=86400000;
- const second=await completed('2026-10-05');assert.equal(second.added,0);
- assert.deepEqual(results,[{added:2,duplicate:0},{added:0,duplicate:2}]);assert.equal(db.prepare('select count(*) as n from cards').get().n,2);
- assert.equal(shown,0);assert.ok(reads>=2);
- console.log(JSON.stringify({platform:process.platform,trayHidden:!main.isVisible(),authenticationWindows:shown,month:second.month,first:results[0],second:results[1],stored:2}));
+ const second=await completed('2026-10-05');assert.equal(second.added,1);
+ const current=monthRows('2026-10'),delta=current.filter(row=>!initial.includes(row));
+ assert.equal(current.length,3);assert.equal(delta.length,1);assert.match(delta[0],/TEST 신규 가맹점/);
+ simulated+=86400000;
+ const third=await completed('2026-10-06');assert.equal(third.added,0);
+ assert.deepEqual(monthRows('2026-09'),previous);assert.deepEqual(monthRows('2026-10'),current);
+ assert.deepEqual(results.map(row=>[row.month,row.added,row.duplicate]),[
+   ['2026-09',2,0],['2026-10',2,0],['2026-09',0,2],['2026-10',1,2],['2026-09',0,2],['2026-10',0,3]
+ ]);
+ assert.equal(shown,0);assert.ok(reads>=3);
+ console.log(JSON.stringify({platform:process.platform,trayHidden:!main.isVisible(),authenticationWindows:shown,first:results[1],late:results[3],recheck:results[5],stored:current.length+previous.length}));
  db.close();app.exit(0);
  }catch(e){console.error(e.stack);app.exit(1);}finally{clearTimeout(watchdog);}
 });

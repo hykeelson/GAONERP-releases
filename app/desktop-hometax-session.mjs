@@ -57,7 +57,7 @@ export function homeTaxDailyImport({file,access,collect,commit,now=Date.now,onPa
  function settings(identity){
    const owner=scope(identity);
    return {enabled:job?.owner===owner,registration:job?.owner===owner?job.registration:verified?.owner===owner?verified.registration:'',
-     last:job?.owner===owner?job.last:null,paused:job?.owner===owner?job.paused:'',retryAt:job?.owner===owner?job.retryAt:0};
+     months:job?.owner===owner?Object.values(job.months||{}):[],last:job?.owner===owner?job.last:null,paused:job?.owner===owner?job.paused:'',retryAt:job?.owner===owner?job.retryAt:0};
  }
  function enable(identity,registration){
    const owner=scope(identity);
@@ -66,28 +66,44 @@ export function homeTaxDailyImport({file,access,collect,commit,now=Date.now,onPa
  }
  async function tick(){
    const started=now(),day=new Date(started+9*3600000).toISOString().slice(0,10);
-   if(running||!job||job.paused||job.day===day||job.retryAt>started)return;
-   const month=new Date(Date.UTC(Number(day.slice(0,4)),Number(day.slice(5,7))-2,1)).toISOString().slice(0,7);
-   const current=job;
+   if(running||!job||job.paused)return;
+   const previous=new Date(Date.UTC(Number(day.slice(0,4)),Number(day.slice(5,7))-2,1)).toISOString().slice(0,7);
+   const months=[previous,day.slice(0,7)];
+   // A legacy 0.3.8 success only covers its recorded month.
+   const entries=Object.fromEntries(months.map(m=>[m,job.months?.[m]||((job.last?.month===m)?job.last:{})]));
+   let current=job;
+   const save=patch=>{persist({...current,...patch,months:{...entries}});current=job;};
    running=true;
    try{
-     const actor=await access();
-     if(job!==current)return;
-     if(scope(actor)!==current.owner){clear();return;}
-     const data=await collect(actor,current.registration,month);
-     if(job!==current)return;
-     if(data.registration!==current.registration)throw Object.assign(Error(),{code:'HT_BUSINESS'});
-     const next=await access();
-     if(job!==current)return;
-     if(scope(next)!==current.owner){clear();return;}
-     const {added,duplicate}=await commit(next,month,data);
-     if(!Number.isSafeInteger(added)||!Number.isSafeInteger(duplicate))throw Error('저장 결과를 확인하지 못했습니다.');
-     if(job===current)persist({...current,day,retryAt:0,last:{day,month,added,duplicate}});
-   }catch(e){
-     if(job!==current)return;
-     const reason={HT_AUTH:'홈택스 재인증',HT_BUSINESS:'홈택스 사업장 확인',HT_PERMISSION:'가온 재무 권한 확인',HT_CONFLICT:'이전 장부와 원본 대조'}[e.code];
-     persist({...current,paused:reason||'',retryAt:reason?0:now()+(e.code==='HT_BUSY'?60000:30*60000)});
-     if(reason)onPause(reason);
+     for(const month of months){
+       const entry=entries[month];
+       if(entry.day===day||entry.retryAt>started)continue;
+       try{
+         const actor=await access();
+         if(job!==current)return;
+         if(scope(actor)!==current.owner){clear();return;}
+         const data=await collect(actor,current.registration,month);
+         if(job!==current)return;
+         if(data.registration!==current.registration)throw Object.assign(Error(),{code:'HT_BUSINESS'});
+         const next=await access();
+         if(job!==current)return;
+         if(scope(next)!==current.owner){clear();return;}
+         const {added,duplicate}=await commit(next,month,data);
+         if(job!==current)return;
+         if(!Number.isSafeInteger(added)||added<0||!Number.isSafeInteger(duplicate)||duplicate<0)throw Error('저장 결과를 확인하지 못했습니다.');
+         entries[month]={day,month,added,duplicate};
+         save({last:entries[month]});
+       }catch(e){
+         if(job!==current)return;
+         const reason={HT_AUTH:'홈택스 재인증',HT_BUSINESS:'홈택스 사업장 확인',HT_PERMISSION:'가온 재무 권한 확인',HT_CONFLICT:'이전 장부와 원본 대조'}[e.code];
+         if(reason){save({paused:reason,retryAt:0});onPause(reason);return;}
+         entries[month]=e.code==='HT_MONTH_UNAVAILABLE'?{month,day,unavailable:true}:{month,retryAt:now()+(e.code==='HT_BUSY'?60000:30*60000)};
+         save({});
+       }
+     }
+     const retryAt=Math.max(...months.map(m=>entries[m].retryAt||0));
+     const completed=months.every(m=>entries[m].day===day)?day:'';
+     if(job===current&&(current.day!==completed||current.retryAt!==retryAt))save({day:completed,retryAt});
    }finally{running=false;}
  }
  return {settings,enable,disable,manual,tick,clear};

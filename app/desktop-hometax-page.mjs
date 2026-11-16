@@ -63,17 +63,23 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    const year=sels.find(e=>/년|연도/.test(labels(e))&&Array.from(e.options).some(o=>compact(o.textContent)===y+'년'||o.value===y));
    const mo=sels.find(e=>/월/.test(labels(e))&&Array.from(e.options).some(o=>/^0?1월?$/.test(compact(o.textContent))));
    const ym=all('input').find(e=>e.type==='month'||(e.type==='text'&&/조회년월|조회연월|조회월|거래년월/.test(labels(e))));
-   const combined=sels.find(e=>/년월|연월/.test(labels(e))&&Array.from(e.options).some(o=>o.textContent.replace(/\D/g,'')===y+m));
-   if(combined){if(!choice(combined,t=>t.replace(/\D/g,'')===y+m))return {};}
-   else if(year&&mo){if(!choice(year,(t,v)=>v===y||t===y+'년')||!choice(mo,(t,v)=>Number(v)===Number(m)||t===Number(m)+'월'||t===m+'월'))return {};}
-   else if(ym){const sep=ym.type==='month'||ym.value.includes('-')?'-':ym.value.includes('.')?'.':'';ym.value=y+sep+m;signal(ym);if(ym.value.replace(/\D/g,'')!==y+m)return {};}
+   const combined=sels.find(e=>/년월|연월/.test(labels(e))&&Array.from(e.options).some(o=>/^20\d{4}$/.test(o.textContent.replace(/\D/g,''))));
+   if(combined){if(!choice(combined,t=>t.replace(/\D/g,'')===y+m))return {monthUnavailable:true};}
+   else if(year&&mo){
+     const selectedYear=year.value;
+     if(!choice(year,(t,v)=>v===y||t===y+'년')||selectedYear!==year.value)return {};
+     if(!choice(mo,(t,v)=>Number(v)===Number(m)||t===Number(m)+'월'||t===m+'월'))return {monthUnavailable:true};
+   }
+   else if(ym){if(ym.type==='month'&&((ym.max&&month>ym.max)||(ym.min&&month<ym.min)))return {monthUnavailable:true};const sep=ym.type==='month'||ym.value.includes('-')?'-':ym.value.includes('.')?'.':'';ym.value=y+sep+m;signal(ym);if(ym.value.replace(/\D/g,'')!==y+m)return {};}
    else {
      const dates=all('input').filter(e=>['date','text'].includes(e.type));
      const from=dates.find(e=>/시작일|조회기간시작|조회시작/.test(labels(e))),to=dates.find(e=>/종료일|조회기간종료|조회종료/.test(labels(e)));
      if(!from||!to)return {};
      const setDate=(input,d)=>{const sep=input.type==='date'||input.value.includes('-')?'-':input.value.includes('.')?'.':'';
        input.value=[y,m,d].join(sep);signal(input);return input.value.replace(/\D/g,'')===y+m+d;};
-     if(!setDate(from,'01')||!setDate(to,String(new Date(Number(y),Number(m),0).getDate())))return {};
+     const today=new Date(Date.now()+9*3600000).toISOString();
+     const endDay=today.slice(0,7)===month?today.slice(8,10):String(new Date(Date.UTC(Number(y),Number(m),0)).getUTCDate());
+     if(!setDate(from,'01')||!setDate(to,endDay))return {};
    }
    const watch=Symbol.for('gaon.hometax.watch');globalThis[watch]?.disconnect();
    const state={changed:false,started:Date.now()};

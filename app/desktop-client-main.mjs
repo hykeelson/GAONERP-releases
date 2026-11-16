@@ -82,9 +82,9 @@ async function showTaxDailySettings(){
  const identity=await taxAccess(),state=taxDaily.settings(identity);
  const last=state.last;
  const detail=state.enabled?[
-   state.paused?'확인 필요 · '+state.paused:state.retryAt?'일시 지연 · 자동으로 다시 시도합니다.':'이 PC에서 매일 지난달 사업용 카드를 확인합니다.',
-   last?last.day+' 수집 · '+last.month+' 신규 '+last.added+'건, 중복 '+last.duplicate+'건':'아직 완료된 자동 수집이 없습니다.'
- ].join('\n'):'가온이 실행 중이면 지난달 사업용 카드 내역을 매일 확인합니다. 처음 한 번 홈택스에서 회사 사업장을 확인하세요.';
+   state.paused?'확인 필요 · '+state.paused:state.retryAt?'일시 지연 · 자동으로 다시 시도합니다.':'이 PC에서 매일 지난달과 이번 달 사업용 카드를 확인합니다.',
+   ...(state.months.length?state.months.map(m=>m.unavailable?m.month+' · 홈택스 조회 월 미제공':m.retryAt?m.month+' · 조회 재시도 예정':m.month+' · '+m.day+' 확인 · 신규 '+m.added+'건, 중복 '+m.duplicate+'건'):[last?last.day+' 수집 · '+last.month+' 신규 '+last.added+'건, 중복 '+last.duplicate+'건':'아직 완료된 자동 수집이 없습니다.'])
+ ].join('\n'):'가온이 실행 중이면 지난달과 이번 달 사업용 카드 내역을 매일 확인합니다. 처음 한 번 홈택스에서 회사 사업장을 확인하세요.';
  const buttons=state.enabled?['닫기','자동 수집 끄기',...(state.paused?['다시 연결']:[])]:['닫기','카드 연결'];
  const choice=await dialog.showMessageBox(window,{type:'info',message:'홈택스 카드 자동 수집 '+(state.enabled?'켜짐':'꺼짐'),detail,buttons,defaultId:0,cancelId:0});
  if(!choice.response)return;

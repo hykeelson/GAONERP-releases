@@ -18,8 +18,8 @@ jobs:
         run: npm test
       - name: Windows first-launch and preload IPC test
         run: npm run smoke
-      - name: Windows tray card collection twice with a temporary ledger
-        timeout-minutes: 5
+      - name: Windows tray card collection with a newly posted transaction with a temporary ledger
+        timeout-minutes: 6
         shell: pwsh
         run: |
           & node_modules/electron/dist/electron.exe app/test/desktop-card-tray-check.mjs | Out-Host
