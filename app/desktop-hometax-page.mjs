@@ -82,8 +82,18 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
      if(!setDate(from,'01')||!setDate(to,endDay))return {};
    }
    const watch=Symbol.for('gaon.hometax.watch');globalThis[watch]?.disconnect();
-   const state={changed:false,started:Date.now()};
-   const observer=new MutationObserver(entries=>{if(entries.some(ent=>[ent.target,...ent.addedNodes].some(n=>(n.parentElement?.closest('tbody,[role=rowgroup]')||n.nodeType===1&&(n.closest('tbody,[role=rowgroup]')||n.matches('tbody,table,[role=grid]')||n.querySelector('tbody'))))))state.changed=true;});
+   const state={changed:false,started:Date.now(),tables:new WeakSet(),emptySince:new WeakMap()};
+   const observer=new MutationObserver(entries=>{
+     for(const {target,addedNodes} of entries){
+       for(const node of [target,...addedNodes]){
+         const el=node.nodeType===1?node:node.parentElement;
+         if(!el)continue;
+         const table=el.closest('tbody')?.closest('table');
+         const touched=table?[table]:el.matches('table')?[el]:node!==target?[...el.querySelectorAll('table:has(tbody)')]:[];
+         for(const t of touched){state.tables.add(t);state.emptySince.delete(t);state.changed=true;}
+       }
+     }
+   });
    observer.observe(document.body,{childList:true,characterData:true,subtree:true});
    globalThis[watch]=observer;globalThis[Symbol.for('gaon.hometax.result')]=state;
    return {ready:click(['조회하기','조회'])};
@@ -145,9 +155,21 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    if(!counts.length)return {problem:'조회 결과의 전체 건수를 확인할 수 없습니다.'};
    const distinct=new Set(counts);if(distinct.size!==1)return {problem:'조회 건수가 여러 개여서 범위를 확인할 수 없습니다.'};
    const total=[...distinct][0];
-   if(liveGrid&&(!total||!records.length)){
-     const explicitEmpty=all('[id*="noresult" i],[class*="noresult" i],[class*="noResult"],td,[role="status"],.w2window').some(e=>/조회(된|한|할)?(자료|데이터|결과|내역)(가|이)?없/.test(compact(e.innerText)));
-     if(total!==0||records.length||!explicitEmpty||Date.now()-globalThis[Symbol.for('gaon.hometax.result')].started<2000)return {};
+   if(!total||!records.length){
+     const state=globalThis[Symbol.for('gaon.hometax.result')];
+     const wrapper=table===liveGrid?document.getElementById(table.id.replace(/_body_table$/,'')):null;
+     const grid=wrapper?.contains(table)?wrapper:table.closest('.w2grid,[role="grid"]')||table;
+     const emptyText=/^(?:조회(?:된|한|할)?|검색(?:된)?)?(?:자료|데이터|결과|내역)(?:가|이)?없(?:습니다|음)[.!]?$/;
+     const markers=grid.querySelectorAll('td,[id*="noresult" i],[class*="noresult" i],[class*="nodata" i],[role="status"]');
+     const empty=Array.from(markers).some(el=>visible(el)&&emptyText.test(compact(el.innerText)));
+     const busy=grid.closest('[aria-busy="true"]')||all('[role="progressbar"],.w2modal_progress').length;
+     if(total!==0||records.length||!state.tables.has(table)||busy||!empty){
+       state.emptySince.delete(table);
+       return {problem:'조회한 결과표에서 완료된 0건 안내를 확인하지 못했습니다.'};
+     }
+     const now=Date.now();
+     if(!state.emptySince.has(table))state.emptySince.set(table,now);
+     if(now-state.emptySince.get(table)<2000)return {};
    }
    return {ready:true,records,total};
  }
