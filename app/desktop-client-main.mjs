@@ -10,6 +10,13 @@ import {startDesktopUpdater} from './desktop-updater.mjs';
 import {clientWebPreferences,clientURLAction,trustedClientStatus,trustedClientDownload,cloudRendererNetworkAllowed,clientDeviceReviewURL,clientPermissionAllowed,clientExternalProtocol} from './desktop-client-policy.mjs';
 
 app.setName('GAON ERP');
+async function guideCardMonth(win,month){
+ const {response}=await dialog.showMessageBox(win,{type:'info',title:'사업용 카드 조회기간 확인',
+  message:`홈택스에서 ${month.replace('-','년 ')}월을 다시 조회해 주세요.`,
+  detail:'조회 화면에서 회사 사업장과 월별 기간을 확인하고, 다른 조건은 그대로 둔 채 조회를 눌러 주세요. 가온이 결과를 다시 읽습니다.',
+  buttons:['조회 화면 열기','취소'],defaultId:0,cancelId:1});
+ if(response!==0)throw Error('카드 재조회를 취소했습니다. 이번 조회는 저장하지 않았습니다.');
+}
 // 창이 뜨기 전에 앱 ID 를 정해야 윈도우 알림이 이 앱 이름으로 뜬다.
 if(process.platform==='win32')app.setAppUserModelId(desktopAppUserModelId);
 const here=path.dirname(fileURLToPath(import.meta.url)),setupFile=path.join(here,'desktop-client-setup.html'),setupURL=pathToFileURL(setupFile).href;
@@ -97,7 +104,7 @@ async function showTaxDailySettings(){
  if(state.enabled&&choice.response===1){taxDaily.disable();return;}
  const today=new Date(Date.now()+9*3600000);
  const month=new Date(Date.UTC(today.getUTCFullYear(),today.getUTCMonth()-1,1)).toISOString().slice(0,7);
- const data=await openHomeTax({BrowserWindow,session,parent:window,registration:state.enabled?state.registration:'',month,cardOnly:true,profile:taxProfiles.acquire(identity.org,identity.actor)});
+ const data=await openHomeTax({BrowserWindow,session,parent:window,registration:state.enabled?state.registration:'',month,cardOnly:true,guideCardMonth,profile:taxProfiles.acquire(identity.org,identity.actor)});
  const confirm=await dialog.showMessageBox(window,{type:'question',message:'이 사업장의 카드 자동 수집을 켤까요?',detail:'사업자등록번호 '+data.registration+' · '+month+' 카드 '+data.groups.card.length+'건',buttons:['취소','자동 수집 켜기'],defaultId:0,cancelId:0});
  if(confirm.response!==1)return;
  await sameEmployee();
@@ -130,7 +137,7 @@ function configureIPC(){
   };
   onStage('access');
   const {actor,org}=await taxAccess();
-  const collected=await openHomeTax({BrowserWindow,session,parent:window,registration,month,onStage,onBusiness:n=>onStage('businessConfirmed',n),profile:taxProfiles.acquire(org,actor)});
+  const collected=await openHomeTax({BrowserWindow,session,parent:window,registration,month,guideCardMonth,onStage,onBusiness:n=>onStage('businessConfirmed',n),profile:taxProfiles.acquire(org,actor)});
   onStage('verifyAccess');cloudSender(event);const current=await taxAccess();if(actor!==current.actor||org!==current.org)throw Error('로그인한 직원이 변경됐습니다.');
   taxDaily?.manual(current,collected.registration);
   return {actor,...collected};

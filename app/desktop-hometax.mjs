@@ -11,7 +11,7 @@ async function waitFor(probe,error,timeout=16000,interval=350){
  do{const result=await probe();if(result)return result;await pause(interval);}while(Date.now()<end);
  throw Error(typeof error==='function'?error():error);
 }
-export async function collectPortal({visit,step,registration,month,cardOnly=false,onStage=()=>{},onBusiness=()=>{},onChooseBusiness=()=>{}}){
+export async function collectPortal({visit,step,registration,month,cardOnly=false,onCardSearch,onStage=()=>{},onBusiness=()=>{},onChooseBusiness=()=>{}}){
  if((registration!==''&&!/^\d{10}$/.test(registration))||!/^20\d\d-(0[1-9]|1[0-2])$/.test(month))throw Error('사업자번호와 조회 월을 확인하세요.');
  await visit();await onStage('login');await waitFor(async()=> (await step('login')).some(r=>r.ready),'홈택스 로그인 상태를 확인할 수 없습니다.',Infinity,1200);
  const selected=async()=>{const ids=new Set((await step('login')).map(r=>r.business).filter(Boolean));return ids.size===1?[...ids][0]:'';};
@@ -42,13 +42,27 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
    },'조회 월이나 매입·매출 선택 상태를 확인할 수 없습니다.');
    const rows=[];let expected;
    for(let page=1;page<=1000;page++){
-     let issue='';
-     const read=await waitFor(async()=>{
+     let issue='',mismatched=false;
+     const probe=async()=>{
        const replies=await step('rows',kind,page);
-       if(replies.some(r=>r.outsideMonth)){issue='선택한 달과 다른 날짜가 포함되어 있습니다.';return false;}
+       if(replies.some(r=>r.outsideMonth)){mismatched=true;issue='선택한 달과 다른 날짜가 포함되어 있습니다.';return false;}
        issue=replies.find(r=>r.problem)?.problem||issue;
        return replies.find(r=>r.ready);
-     },()=>(kind==='card'?'사업용 카드':kind==='purchase'?'매입 계산서':'매출 계산서')+' 조회를 완료하지 못했습니다. '+(issue||'조회 결과의 전체 건수를 확인하지 못했습니다.')+' 이번 조회는 저장하지 않았습니다.',60000);
+     };
+     const failure=()=>(kind==='card'?'사업용 카드':kind==='purchase'?'매입 계산서':'매출 계산서')+' 조회를 완료하지 못했습니다. '+(issue||'조회 결과의 전체 건수를 확인하지 못했습니다.')+' 이번 조회는 저장하지 않았습니다.';
+     let read;
+     try{read=await waitFor(probe,failure,60000);}
+     catch(error){
+       if(kind!=='card'||page!==1||!mismatched||!onCardSearch||error.message!==failure())throw error;
+       if(!(await step('armCardSearch',kind)).some(r=>r.ready))throw error;
+       await onCardSearch(month);
+       // Accept only a new, nonempty result. An empty result cannot establish the date of a manual search.
+       read=await waitFor(async()=>{
+         const fresh=await probe();
+         return fresh?.records?.length && fresh.total>0 ? fresh : false;
+       },failure,180000);
+       if(await selected()!==business)throw Error('수집 중 사업장이 달라졌습니다.');
+     }
      expected??=read.total;
      if(expected!==read.total||expected>5000||rows.length+read.records.length>expected)throw Error('조회 중 건수가 달라졌거나 한도(5,000건)를 넘었습니다.');
      rows.push(...read.records);
@@ -65,7 +79,7 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
  return {registration:business,groups:result};
 }
 let busy=false;
-export async function openHomeTax({BrowserWindow,session,parent,registration,month,onStage,onBusiness,profile,background=false,cardOnly=background}){
+export async function openHomeTax({BrowserWindow,session,parent,registration,month,onStage,onBusiness,guideCardMonth,profile,background=false,cardOnly=background}){
  if(busy)throw Object.assign(Error('홈택스 가져오기가 진행 중입니다.'),{code:'HT_BUSY'});
  if(background&&!profile)throw Error('자동 수집에는 등록된 사업장이 필요합니다.');
  busy=true;let win,isolated,deadline;
@@ -89,17 +103,21 @@ export async function openHomeTax({BrowserWindow,session,parent,registration,mon
    secure(win.webContents,true);
    let lastReady=false,openedForAuth=false,loginChecks=0;
    const entryLinks=[];let entryStarted=0;
+   let queryFrame;
    const step=async(op,kind,page)=>{
      if(profile&&!profile.valid())throw Error('직원 로그인이 변경됐습니다.');
      if(win.isDestroyed())throw Error('홈택스 창이 닫혔습니다.');
      const out=[];
      for(const frame of win.webContents.mainFrame.framesInSubtree){
        if(!official(frame.url))continue;
+       const frameKey=frame.frameTreeNodeId??frame;
+       if(['rows','next','armCardSearch'].includes(op)&&frameKey!==queryFrame)continue;
        const args=JSON.stringify({op,kind,page,registration,month});
        const code='('+official.toString()+')(location.href)?('+homeTaxStep.toString()+')('+args+'):{}';
        const contents=win.webContents;
        const run=frame===contents.mainFrame?contents.executeJavaScriptInIsolatedWorld(301,[{code}]):frame.executeJavaScript(code);
        const r=await run.catch(()=>null);
+       if(r?.ready&&op==='query')queryFrame=frameKey;
        if(r)out.push(r);
        if(r?.ready&&op!=='login')break;
      }
@@ -134,6 +152,7 @@ export async function openHomeTax({BrowserWindow,session,parent,registration,mon
    let confirmedBusiness=registration;
    for(let attempt=0;;attempt++){
      try{return await collectPortal({visit:()=>win.loadURL(home),step,registration:confirmedBusiness,month,cardOnly,onStage,
+       onCardSearch:!background&&guideCardMonth?async target=>{win.show();win.focus();await guideCardMonth(win,target);}:undefined,
        onChooseBusiness:()=>{if(background)throw Object.assign(Error('홈택스 사업장을 확인하세요.'),{code:'HT_BUSINESS'});win.show();win.focus();},onBusiness:n=>{confirmedBusiness=n;onBusiness?.(n);if(profile)win.hide();}});}
      catch(error){if(!error.reauth||attempt>=2)throw error;lastReady=false;openedForAuth=false;loginChecks=0;entryLinks.length=0;entryStarted=0;}
    }

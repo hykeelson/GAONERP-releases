@@ -51,6 +51,19 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    return {};
  }
  if(op==='expand')return {ready:click(['전체메뉴','전체 메뉴 열기','전체메뉴 보기'])};
+ // An interactive retry must see a new search on the same official inquiry.
+ if(op==='armCardSearch'){
+   const state=globalThis[Symbol.for('gaon.hometax.result')];
+   if(!card||!state?.search?.isConnected||!visible(state.search))return {};
+   state.manualClicked=false;
+   const clicked=e=>{
+     if(!e.isTrusted||!e.composedPath().includes(state.search))return;
+     state.changed=false;state.tables=new WeakSet();state.emptySince=new WeakMap();
+     state.manualClicked=true;document.removeEventListener('click',clicked,true);
+   };
+   document.addEventListener('click',clicked,true);
+   return {ready:true};
+ }
  if(op==='query'){
    if(!named(['조회하기','조회']))return {};
    // Only act on the intended inquiry screen; unrelated "조회" controls are common in the portal.
@@ -79,8 +92,9 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
      const pending=setChoices(combined,(t,v)=>[t,v].some(k=>k.replace(/\D/g,'')===y+m));
      if(pending)return pending;
    }else if(years.length&&months.length){
-     const pending=setChoices(years,(t,v)=>v===y||t===y+'년')||
-       setChoices(months,(t,v)=>Number(v)===Number(m)||t===Number(m)+'월'||t===m+'월');
+     // Some select values are internal indices. An explicit calendar label takes precedence.
+     const pending=setChoices(years,(t,v)=>/^\d{4}년?$/.test(t)?parseInt(t,10)===Number(y):v===y)||
+       setChoices(months,(t,v)=>/^\d{1,2}월?$/.test(t)?parseInt(t,10)===Number(m):Number(v)===Number(m));
      if(pending)return pending;
    }else if(monthInputs.length){
      for(const ym of monthInputs){
@@ -101,7 +115,7 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
      if(!setDate(from,'01')||!setDate(to,endDay))return {};
    }
    const watch=Symbol.for('gaon.hometax.watch');globalThis[watch]?.disconnect();
-   const state={changed:false,tables:new WeakSet(),emptySince:new WeakMap()};
+   const state={search:named(['조회하기','조회']),changed:false,tables:new WeakSet(),emptySince:new WeakMap()};
    const observer=new MutationObserver(entries=>{
      for(const {target,addedNodes} of entries){
        for(const node of [target,...addedNodes]){
@@ -115,7 +129,8 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    });
    observer.observe(document.body,{childList:true,characterData:true,subtree:true});
    globalThis[watch]=observer;globalThis[Symbol.for('gaon.hometax.result')]=state;
-   return {ready:click(['조회하기','조회'])};
+   if(!state.search||state.search.disabled||state.search.getAttribute('aria-disabled')==='true')return {};
+   state.search.click();return {ready:true};
  }
  if(op==='next'){
    const link=named([String(page),page+' 페이지',page+'페이지','다음 페이지']);
@@ -123,7 +138,8 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    globalThis[Symbol.for('gaon.hometax.result')].changed=false;link.click();return {ready:true};
  }
  if(op==='rows'&&page>1&&!all('[aria-current=page],.w2pageList_selected,.w2page_link.active,[class*="paging"] .active').some(e=>parseInt(e.textContent,10)===page))return {};
- if(op!=='rows'||!globalThis[Symbol.for('gaon.hometax.result')]?.changed)return {};
+ const resultState=globalThis[Symbol.for('gaon.hometax.result')];
+ if(op!=='rows'||!resultState?.changed||resultState.manualClicked===false)return {};
  const readCounts=table=>{
    // The official invoice pager has a numeric span, separate from the invoice grid.
    const totalLabel=document.getElementById('mf_txppWframe_txtTotal');
@@ -155,6 +171,7 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    if(!state.tables.has(table)||table.closest('[aria-busy="true"]')||all('[role="progressbar"],.w2modal_progress').length)continue;
    const records=[];
    for(const tr of table.querySelectorAll('tbody tr')){
+     if(!visible(tr)||tr.getAttribute('aria-hidden')==='true')continue;
      const cells=Array.from(tr.cells);
      if(!cells.length||cells.every(c=>c.tagName==='TH')||(!trim(tr.textContent)&&tr.getAttribute('aria-hidden')==='true')||/조회된.*없|조회.*없습니다/.test(tr.textContent))continue;
      if(cells.length!==headers.length)return {problem:'표의 열을 확인할 수 없습니다.'};
