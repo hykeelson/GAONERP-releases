@@ -1,7 +1,12 @@
 const {contextBridge,ipcRenderer}=require('electron');
 
 contextBridge.exposeInMainWorld('gaonDesktop',Object.freeze({
- homeTax:(registration,month)=>ipcRenderer.invoke('gaon-client:hometax',{registration,month}),
+ homeTax:async(registration,month,attempt,onProgress)=>{
+  const listener=(_event,progress)=>{if(progress.attempt===attempt&&typeof onProgress==='function')onProgress(progress.stage,progress.business);};
+  ipcRenderer.on('gaon-client:hometax-progress',listener);
+  try{return await ipcRenderer.invoke('gaon-client:hometax',{registration,month,attempt});}
+  finally{ipcRenderer.removeListener('gaon-client:hometax-progress',listener);}
+ },
  state:()=>ipcRenderer.invoke('gaon-client:state'),
  reconnect:()=>ipcRenderer.invoke('gaon-client:reconnect'),
  login:()=>ipcRenderer.invoke('gaon-client:login'),

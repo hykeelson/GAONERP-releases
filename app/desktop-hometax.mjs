@@ -60,12 +60,12 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
  }
  // The homepage and invoice search may omit the selected business. Recheck it
  // on the card inquiry that explicitly names the current taxpayer.
- await navigateMenu('card');
+ await onStage('verifyBusiness');await navigateMenu('card');
  await waitFor(async()=>(await selected())===business,'수집 중 사업장이 달라졌습니다.');
  return {registration:business,groups:result};
 }
 let busy=false;
-export async function openHomeTax({BrowserWindow,session,parent,registration,month,onStage,profile,background=false,cardOnly=background}){
+export async function openHomeTax({BrowserWindow,session,parent,registration,month,onStage,onBusiness,profile,background=false,cardOnly=background}){
  if(busy)throw Object.assign(Error('홈택스 가져오기가 진행 중입니다.'),{code:'HT_BUSY'});
  if(background&&!profile)throw Error('자동 수집에는 등록된 사업장이 필요합니다.');
  busy=true;let win,isolated,deadline;
@@ -134,7 +134,7 @@ export async function openHomeTax({BrowserWindow,session,parent,registration,mon
    let confirmedBusiness=registration;
    for(let attempt=0;;attempt++){
      try{return await collectPortal({visit:()=>win.loadURL(home),step,registration:confirmedBusiness,month,cardOnly,onStage,
-       onChooseBusiness:()=>{if(background)throw Object.assign(Error('홈택스 사업장을 확인하세요.'),{code:'HT_BUSINESS'});win.show();win.focus();},onBusiness:n=>{confirmedBusiness=n;if(profile)win.hide();}});}
+       onChooseBusiness:()=>{if(background)throw Object.assign(Error('홈택스 사업장을 확인하세요.'),{code:'HT_BUSINESS'});win.show();win.focus();},onBusiness:n=>{confirmedBusiness=n;onBusiness?.(n);if(profile)win.hide();}});}
      catch(error){if(!error.reauth||attempt>=2)throw error;lastReady=false;openedForAuth=false;loginChecks=0;entryLinks.length=0;entryStarted=0;}
    }
  }finally{clearTimeout(deadline);busy=false;if(win&&!win.isDestroyed())win.destroy();profile?.release();if(isolated&&!profile)await isolated.clearStorageData();}
