@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import {app,BrowserWindow,session,safeStorage,Menu} from 'electron';
 import {DatabaseSync} from 'node:sqlite';
-import {mkdtemp,readFile} from 'node:fs/promises';
+import {mkdtemp} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {homeTaxProfileStore,homeTaxDailyImport} from '../desktop-hometax-session.mjs';
@@ -77,8 +78,9 @@ app.whenReady().then(async()=>{
  main.close();assert.ok(!main.isVisible()&&!main.isDestroyed());
  console.log('Windows main window closed to tray');
  async function completed(day){
-   return until(async()=>{const prefs=JSON.parse(await readFile(file));return prefs.day===day&&prefs.last;},120000).catch(async error=>{
-     const {day:storedDay,months,paused}=JSON.parse(await readFile(file));
+   // Read on the same event loop as the atomic rename so Windows never sees an open test-reader handle during replacement.
+   return until(()=>{const prefs=JSON.parse(readFileSync(file,'utf8'));return prefs.day===day&&prefs.last;},120000).catch(error=>{
+     const {day:storedDay,months,paused}=JSON.parse(readFileSync(file,'utf8'));
      console.error('Unfinished synthetic day',day,{storedDay,months,paused,results,shown,reads});throw error;
    });
  }
