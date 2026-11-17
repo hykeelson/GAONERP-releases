@@ -60,17 +60,36 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    if(!card&&!radio(kind==='purchase'?'매입':'매출'))return {};
    radio('월별');
    const [y,m]=month.split('-'), sels=all('select');
-   const year=sels.find(e=>/년|연도/.test(labels(e))&&Array.from(e.options).some(o=>compact(o.textContent)===y+'년'||o.value===y));
-   const mo=sels.find(e=>/월/.test(labels(e))&&Array.from(e.options).some(o=>/^0?1월?$/.test(compact(o.textContent))));
-   const ym=all('input').find(e=>e.type==='month'||(e.type==='text'&&/조회년월|조회연월|조회월|거래년월/.test(labels(e))));
-   const combined=sels.find(e=>/년월|연월/.test(labels(e))&&Array.from(e.options).some(o=>/^20\d{4}$/.test(o.textContent.replace(/\D/g,''))));
-   if(combined){if(!choice(combined,t=>t.replace(/\D/g,'')===y+m))return {monthUnavailable:true};}
-   else if(year&&mo){
-     const selectedYear=year.value;
-     if(!choice(year,(t,v)=>v===y||t===y+'년')||selectedYear!==year.value)return {};
-     if(!choice(mo,(t,v)=>Number(v)===Number(m)||t===Number(m)+'월'||t===m+'월'))return {monthUnavailable:true};
+   const years=sels.filter(e=>/년|연도/.test(labels(e))&&Array.from(e.options).some(o=>compact(o.textContent)===y+'년'||o.value===y));
+   const months=sels.filter(e=>/월/.test(labels(e))&&Array.from(e.options).some(o=>/^0?1월?$/.test(compact(o.textContent))));
+   const monthInputs=all('input').filter(e=>e.type==='month'||(e.type==='text'&&/조회년월|조회연월|조회월|거래년월|시작년월|종료년월/.test(labels(e))));
+   const yearMonthOption=(o)=>[o.textContent,o.value].some(t=>/^20\d{4}$/.test(t.replace(/\D/g,'')));
+   const combined=sels.filter(e=>/년월|연월|조회기간/.test(labels(e))&&Array.from(e.options).some(yearMonthOption));
+   const setChoices=(controls,matches)=>{
+     for(const el of controls){
+       const option=Array.from(el.options).find(o=>matches(compact(o.textContent),o.value));
+       if(!option)return {monthUnavailable:true};
+       // The portal can rebuild the end selector after the start changes. On the
+       // next probe re-read both controls from the DOM before pressing Search.
+       if(el.value!==option.value){choice(el,matches);return {};}
+     }
+     return null;
+   };
+   if(combined.length){
+     const pending=setChoices(combined,(t,v)=>[t,v].some(k=>k.replace(/\D/g,'')===y+m));
+     if(pending)return pending;
+   }else if(years.length&&months.length){
+     const pending=setChoices(years,(t,v)=>v===y||t===y+'년')||
+       setChoices(months,(t,v)=>Number(v)===Number(m)||t===Number(m)+'월'||t===m+'월');
+     if(pending)return pending;
+   }else if(monthInputs.length){
+     for(const ym of monthInputs){
+       if(ym.type==='month'&&((ym.max&&month>ym.max)||(ym.min&&month<ym.min)))return {monthUnavailable:true};
+       const sep=ym.type==='month'||ym.value.includes('-')?'-':ym.value.includes('.')?'.':'';
+       if(ym.value.replace(/\D/g,'')!==y+m){ym.value=y+sep+m;signal(ym);}
+       if(ym.value.replace(/\D/g,'')!==y+m)return {};
+     }
    }
-   else if(ym){if(ym.type==='month'&&((ym.max&&month>ym.max)||(ym.min&&month<ym.min)))return {monthUnavailable:true};const sep=ym.type==='month'||ym.value.includes('-')?'-':ym.value.includes('.')?'.':'';ym.value=y+sep+m;signal(ym);if(ym.value.replace(/\D/g,'')!==y+m)return {};}
    else {
      const dates=all('input').filter(e=>['date','text'].includes(e.type));
      const from=dates.find(e=>/시작일|조회기간시작|조회시작/.test(labels(e))),to=dates.find(e=>/종료일|조회기간종료|조회종료/.test(labels(e)));
@@ -82,7 +101,7 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
      if(!setDate(from,'01')||!setDate(to,endDay))return {};
    }
    const watch=Symbol.for('gaon.hometax.watch');globalThis[watch]?.disconnect();
-   const state={changed:false,started:Date.now(),tables:new WeakSet(),emptySince:new WeakMap()};
+   const state={changed:false,tables:new WeakSet(),emptySince:new WeakMap()};
    const observer=new MutationObserver(entries=>{
      for(const {target,addedNodes} of entries){
        for(const node of [target,...addedNodes]){
@@ -132,6 +151,8 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    let headers=Array.from(table.querySelectorAll('thead tr:last-child th')).map(e=>compact(e.innerText||e.textContent).replace(/\(종사업장번호\)$/,''));
    if(!headers.length)headers=Array.from(table.querySelectorAll('tr:first-child th')).map(e=>compact(e.textContent));
    if(!(card?headers.some(h=>h==='승인일자'||h==='거래일자'):headers.includes('승인번호')))continue;
+   const state=globalThis[Symbol.for('gaon.hometax.result')];
+   if(!state.tables.has(table)||table.closest('[aria-busy="true"]')||all('[role="progressbar"],.w2modal_progress').length)continue;
    const records=[];
    for(const tr of table.querySelectorAll('tbody tr')){
      const cells=Array.from(tr.cells);
@@ -147,7 +168,7 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
        const val=input?trim(Array.from(input.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent).join('')||input.innerText):trim(cells[i].innerText);record[key]=key==='카드번호'?val.replace(/[^0-9*]/g,'').slice(-4):val;
      });
      const day=String(record[card?'승인일자':'작성일자']||record[card?'거래일자':'작성일']||'').replace(/[.\s/-]/g,'');
-     if(/^\d{8}$/.test(day)&&day.slice(0,6)!==month.replace('-','')&&Date.now()-globalThis[Symbol.for('gaon.hometax.result')].started>2500)return {outsideMonth:true};
+     if(/^\d{8}$/.test(day)&&day.slice(0,6)!==month.replace('-',''))return {outsideMonth:true};
      if(!/^\d{8}$/.test(day)||day.slice(0,6)!==month.replace('-','')||!(/^-?[\d,]+$/.test(record['합계금액']||record['합계']||record['사용금액']||record['총금액']||'')))return {};
      records.push(record);
    }

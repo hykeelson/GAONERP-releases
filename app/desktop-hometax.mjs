@@ -45,7 +45,7 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
      let issue='';
      const read=await waitFor(async()=>{
        const replies=await step('rows',kind,page);
-       if(replies.some(r=>r.outsideMonth))throw Error('선택한 달과 다른 날짜가 포함되어 있습니다.');
+       if(replies.some(r=>r.outsideMonth)){issue='선택한 달과 다른 날짜가 포함되어 있습니다.';return false;}
        issue=replies.find(r=>r.problem)?.problem||issue;
        return replies.find(r=>r.ready);
      },()=>(kind==='card'?'사업용 카드':kind==='purchase'?'매입 계산서':'매출 계산서')+' 조회를 완료하지 못했습니다. '+(issue||'조회 결과의 전체 건수를 확인하지 못했습니다.')+' 이번 조회는 저장하지 않았습니다.',60000);
