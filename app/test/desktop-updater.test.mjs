@@ -67,3 +67,24 @@ test('업데이트 주소는 공개 릴리즈 저장소 하나로 고정되고, 
  }
  assert.doesNotMatch(await readFile(new URL('../desktop-updater.mjs',import.meta.url),'utf8'),/setFeedURL/,'설치본 밖 주소로 바꾸지 않음');
 });
+
+test('수동 확인에서 설치 버전, 연결 실패, 재확인 및 나중에 받은 업데이트 설치를 구분한다',async()=>{
+ const updater=fakeUpdater(),timers=fakeTimers(),messages=[];
+ let choice=1;
+ const handle=startDesktopUpdater({app:{isPackaged:true,getVersion:()=>'1.2.3'},platform:'win32',env:{},updater,timers,
+  dialog:{showMessageBox:async options=>{messages.push(options);return {response:choice};}},log:quiet});
+ updater.checkForUpdates=async()=>({isUpdateAvailable:false});
+ await handle.checkManually();
+ assert.match(messages.at(-1).message,/1\.2\.3.*최신/);
+ updater.checkForUpdates=async()=>{throw Error('offline');};
+ await handle.checkManually();assert.equal(messages.at(-1).type,'warning');
+ updater.checkForUpdates=async()=>({isUpdateAvailable:true,downloadPromise:Promise.reject(Error('download failed'))});
+ await handle.checkManually();assert.equal(messages.at(-1).type,'warning');
+ updater.checkForUpdates=async()=>({isUpdateAvailable:true,downloadPromise:Promise.resolve().then(()=>updater.handlers['update-downloaded']({version:'1.2.4'}))});
+ await handle.checkManually();
+ assert.match(messages.at(-1).message,/1\.2\.4/);
+ assert.equal(updater.calls.install.length,0);
+ choice=0;
+ await handle.checkManually();timers.queue.at(-1).fn();
+ assert.deepEqual(updater.calls.install,[[false,true]]);
+});

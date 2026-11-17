@@ -21,19 +21,46 @@ export function startDesktopUpdater({app,dialog,getWindow,platform=process.platf
  autoUpdater.allowPrerelease=false;
  autoUpdater.allowDowngrade=false;
  autoUpdater.logger=null;
- let asked='',stopped=false;
+ let downloaded='',stopped=false,asking=false,manual=false,installing=false;
+ function show(options){
+  const window=getWindow?.();
+  return window&&!window.isDestroyed?.()?dialog.showMessageBox(window,options):dialog.showMessageBox(options);
+ }
  const check=()=>stopped?Promise.resolve(null):Promise.resolve().then(()=>autoUpdater.checkForUpdates()).catch(error=>{log.warn?.('GAON 업데이트 확인 실패:',error?.message||error);return null;});
- // 인터넷이 끊겼거나 GitHub 이 응답하지 않는 건 흔한 일이라 창을 띄우지 않고 다음 확인을 기다린다.
+ async function offerRestart(){
+  if(!downloaded||asking||stopped||installing)return;
+  asking=true;
+  try{
+   const {response}=await show({type:'info',title:'GAON ERP 업데이트',message:`새 버전이 준비됐어요 (${downloaded}).`,detail:'열어 둔 작업을 저장한 뒤 다시 시작하세요. 나중에 설치하려면 파일 → 종료를 선택하세요.',buttons:['지금 다시 시작','나중에'],defaultId:0,cancelId:1,noLink:true});
+   if(response===0&&!stopped){
+    installing=true;
+    timers.setTimeout(()=>autoUpdater.quitAndInstall(false,true),0);
+   }
+  }finally{asking=false;}
+ }
  autoUpdater.on('error',error=>log.warn?.('GAON 업데이트 오류:',error?.message||error));
  autoUpdater.on('update-downloaded',async info=>{
-  const version=String(info?.version||'');
-  if(stopped||asked===version)return;
-  asked=version;
-  const window=getWindow?.();
-  const options={type:'info',title:'GAON ERP 업데이트',message:`새 버전이 준비됐어요${version?` (${version})`:''}.`,detail:'지금 다시 시작하면 바로 바뀝니다. 나중에 하면 앱을 끌 때 자동으로 바뀝니다.',buttons:['지금 다시 시작','나중에'],defaultId:0,cancelId:1,noLink:true};
-  const {response}=await (window&&!window.isDestroyed?.()?dialog.showMessageBox(window,options):dialog.showMessageBox(options));
-  if(response===0&&!stopped)timers.setTimeout(()=>autoUpdater.quitAndInstall(false,true),0);
+  if(stopped||!info?.version||downloaded===info.version)return;
+  downloaded=info.version;
+  await offerRestart();
  });
+ async function checkManually(){
+  if(stopped||manual||installing)return;
+  manual=true;
+  try{
+   if(downloaded)return await offerRestart();
+   const result=await check();
+   if(stopped||downloaded)return;
+   if(!result)throw Error('check failed');
+   if(result.downloadPromise){
+    await result.downloadPromise;
+   }else if(result.isUpdateAvailable===false){
+    await show({type:'info',title:'GAON ERP 업데이트',message:`현재 버전 ${app.getVersion()}이 최신입니다.`});
+   }else throw Error('missing update status');
+  }catch{
+   if(!stopped)await show({type:'warning',title:'GAON ERP 업데이트',message:'업데이트를 완료하지 못했습니다.',detail:'인터넷 연결을 확인하고 도움말 → 업데이트 확인을 다시 눌러 주세요.'});
+  }finally{manual=false;}
+ }
  const first=timers.setTimeout(check,UPDATE_FIRST_CHECK_MS),every=timers.setInterval(check,UPDATE_INTERVAL_MS);
- return {enabled:true,check,stop(){stopped=true;timers.clearTimeout(first);timers.clearInterval(every);}};
+ return {enabled:true,check,checkManually,stop(){stopped=true;timers.clearTimeout(first);timers.clearInterval(every);}};
 }

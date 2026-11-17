@@ -50,8 +50,9 @@ async function start(){
  cloud=createDesktopCloudSession({store:createDesktopCredentialStore({file:path.join(app.getPath('userData'),'cloud-session.bin'),safeStorage}),fetcher:(...args)=>ses().fetch(...args),onUnauthorized:()=>{signedIn=false;locationGranted=false;notifications?.reset();taxDaily?.clear();taxProfiles.clear().catch(()=>{});}});
  if(app.isPackaged&&process.platform==='win32')app.setAsDefaultProtocolClient('studio.keelson.gaon');
  if(process.platform==='win32')startTaxDaily();
- configureSession();configureNotifications();configureIPC();setMenu();createWindow();
+ configureSession();configureNotifications();configureIPC();
  updater=startDesktopUpdater({app,dialog,getWindow:()=>window});
+ setMenu();createWindow();
  if(!app.isPackaged&&process.env.GAON_DESKTOP_SMOKE==='1')return showSetup('검수용 첫 실행');
  try{await verifyServer();signedIn=await verifySession();if(signedIn)return openERP();return showSetup('등록된 직원 계정으로 로그인해 주세요.');}
  catch(error){return showSetup(error.message);}
@@ -192,7 +193,13 @@ async function openManual(){
  const file=path.join(app.getAppPath(),'app/desktop-client-manual.html');if(!await access(file).then(()=>true,()=>false)){await dialog.showMessageBox(window,{title:'빠른 사용 안내',message:'1. 기본 GAON 서버 주소를 확인합니다.\n2. 직원 로그인을 누르고 기본 브라우저에서 로그인합니다.\n3. 로그인 완료 후 앱으로 돌아오면 ERP가 열립니다.',detail:'서버 주소 변경이 필요하면 도움말 메뉴에서 연결 설정을 여세요.'});return;}
  if(manualWindow&&!manualWindow.isDestroyed()){manualWindow.focus();return;}manualWindow=new BrowserWindow({title:'GAON ERP 빠른 사용 안내',width:820,height:720,parent:window,webPreferences:clientWebPreferences});await manualWindow.loadFile(file);
 }
-function setMenu(){Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'파일',submenu:[...(taxDaily?[{label:'홈택스 카드 자동 수집 설정…',click:()=>showTaxDailySettings().catch(e=>dialog.showMessageBox({type:'warning',message:e.message}))}]:[]),{label:'직원 로그인',click:()=>beginLogin().catch(error=>dialog.showMessageBox({type:'warning',message:error.message}))},{label:'로그인 화면',click:()=>showSetup()},{type:'separator'},{role:'quit',label:'종료'}]},{label:'보기',submenu:[{role:'reload',label:'새로고침'},{role:'resetZoom',label:'실제 크기'},{role:'zoomIn',label:'확대'},{role:'zoomOut',label:'축소'},{role:'togglefullscreen',label:'전체 화면'}]},{label:'도움말',submenu:[{label:'가온봇 경량 분류 검수',type:'checkbox',click:toggleDeviceReview},{type:'separator'},{label:'빠른 사용 안내',click:openManual},{label:'브라우저에서 열기',click:()=>{if(serverOrigin&&signedIn)shell.openExternal(serverOrigin+'/erp/home.html#today');}}]}]));}
+async function checkDesktopUpdate(item){
+ item.enabled=false;
+ item.label='업데이트 확인 중…';
+ try{await updater.checkManually();}
+ finally{item.label='업데이트 확인';item.enabled=true;}
+}
+function setMenu(){Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'파일',submenu:[...(taxDaily?[{label:'홈택스 카드 자동 수집 설정…',click:()=>showTaxDailySettings().catch(e=>dialog.showMessageBox({type:'warning',message:e.message}))}]:[]),{label:'직원 로그인',click:()=>beginLogin().catch(error=>dialog.showMessageBox({type:'warning',message:error.message}))},{label:'로그인 화면',click:()=>showSetup()},{type:'separator'},{role:'quit',label:'종료'}]},{label:'보기',submenu:[{role:'reload',label:'새로고침'},{role:'resetZoom',label:'실제 크기'},{role:'zoomIn',label:'확대'},{role:'zoomOut',label:'축소'},{role:'togglefullscreen',label:'전체 화면'}]},{label:'도움말',submenu:[{label:'현재 버전 '+app.getVersion(),enabled:false},...(updater?.enabled?[{label:'업데이트 확인',click:checkDesktopUpdate}]:[]),{type:'separator'},{label:'가온봇 경량 분류 검수',type:'checkbox',click:toggleDeviceReview},{type:'separator'},{label:'빠른 사용 안내',click:openManual},{label:'브라우저에서 열기',click:()=>{if(serverOrigin&&signedIn)shell.openExternal(serverOrigin+'/erp/home.html#today');}}]}]));}
 
 async function toggleDeviceReview(item){
  const desired=item.checked;
