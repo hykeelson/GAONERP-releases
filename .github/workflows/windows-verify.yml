@@ -168,7 +168,58 @@ jobs:
             }
             if (!(Test-Path $exe) -or (Get-Item $exe).VersionInfo.ProductVersion -notin $expected,($expected+'.0')) { continue }
             $new = @(Get-Process -Name 'GAON ERP' -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $client.Id -and $_.MainWindowHandle -ne 0 -and $_.Path -eq $exe })
-            if ($new.Count) { Write-Host "Verified published 0.3.10 -> $expected and relaunched GUI"; exit 0 }
+            if ($new.Count) { break }
           }
-          Get-Process | Where-Object { $_.ProcessName -match 'GAON|setup' -or $_.MainWindowTitle -match 'GAON' } | Format-Table Id,ProcessName,MainWindowTitle
-          throw 'New version and relaunched window not verified'
+          if (!$new.Count) {throw "New version and relaunched window not verified"}
+          Write-Host "Verified published 0.3.10 -> $expected and relaunched GUI"
+          Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class GaonHelpMouse {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
+            public static void Click(int x,int y) {SetCursorPos(x,y);mouse_event(2,0,0,0,UIntPtr.Zero);mouse_event(4,0,0,0,UIntPtr.Zero);}
+          }
+          "@
+          $desktop = [Windows.Automation.AutomationElement]::RootElement
+          $tree = [Windows.Automation.TreeScope]
+          $pidFilter = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty,$new[0].Id)
+          function Find-GaonText([string]$label) {
+            $matchName = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,$label)
+            foreach ($top in $desktop.FindAll($tree::Children,$pidFilter)) {
+              $elements=$top.FindAll($tree::Descendants,$matchName)
+              foreach($element in $elements) {
+                $bounds=$element.Current.BoundingRectangle
+                if (!$element.Current.IsOffscreen -and $bounds.Width -gt 0 -and $bounds.Height -gt 0) {return $element}
+              }
+            }
+          }
+          function Wait-GaonText([string]$label,[int]$seconds) {
+            $end=[datetime]::UtcNow.AddSeconds($seconds)
+            do {
+              $el=Find-GaonText $label
+              if ($el) {return $el}
+              Start-Sleep -Milliseconds 300
+            } while ([datetime]::UtcNow -lt $end)
+            $visible=foreach($top in $desktop.FindAll($tree::Children,$pidFilter)){
+              foreach($item in $top.FindAll($tree::Descendants,[Windows.Automation.Condition]::TrueCondition)){
+                if (!$item.Current.IsOffscreen -and $item.Current.Name) {$item.Current.Name}
+              }
+            }
+            throw "Missing '$label' in GAON UI. Visible: $(($visible | Select-Object -First 55) -join ' / ')"
+          }
+          function Click-GaonElement($element) {
+            $r=$element.Current.BoundingRectangle
+            [GaonHelpMouse]::Click([int]($r.Left+$r.Width/2),[int]($r.Top+$r.Height/2))
+          }
+          if (!$shell.AppActivate($new[0].Id)) {throw 'Relaunched GAON window could not be focused'}
+          $help=Wait-GaonText '도움말' 20
+          Click-GaonElement $help
+          $version=Wait-GaonText "현재 버전 $expected" 10
+          Write-Host "Help menu shows installed version: $($version.Current.Name)"
+          $check=Wait-GaonText '업데이트 확인' 5
+          Click-GaonElement $check
+          $latest=Wait-GaonText "현재 버전 ${expected}이 최신입니다." 30
+          Write-Host "Clicked Help > Check for updates. Dialog: $($latest.Current.Name)"
+          $shell.SendKeys('{ENTER}')
