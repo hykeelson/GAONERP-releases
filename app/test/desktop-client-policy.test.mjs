@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
 import {normalizeServerURL,clientURLAction,trustedClientHealth,trustedClientStatus,trustedClientDownload,clientWebPreferences} from '../desktop-client-policy.mjs';
 
 const origin='https://erp.example.com';
@@ -108,4 +110,31 @@ test('2026-10-29 설치 앱 전수 검사: 복사·전화·메일·PDF·주소 �
  assert.equal(clientPermissionAllowed('clipboard-read','https://evil.example',origin),false);assert.equal(clientPermissionAllowed('media',origin,origin),false);assert.equal(clientPermissionAllowed('notifications',origin,origin),false);
  for(const url of ['tel:01012345678','tel:010-1234-5678','sms:01012345678','mailto:a@example.com'])assert.equal(clientExternalProtocol(url),true,url);
  for(const url of ['tel:abc','mailto:a@b.com,c@d.com','javascript:alert(1)','file:///etc/passwd','ms-settings:privacy','https://gaon-erp-keelson.web.app/'])assert.equal(clientExternalProtocol(url),false,url);
+});
+
+
+test('HomeTax progress keeps both card months and omits non-diagnostic fields',async()=>{
+ const attempt='10000000-0000-4000-8000-000000000001',registration='0000000000',month='2026-08';
+ const expected={clientVersion:'0.3.18',platform:'win32',queryMode:'combined',resultMonth:month,approvalMonth:'2026-07',purchaseMonth:month,dateBasis:'purchase'};
+ const channels=new Map(),events=[];
+ let desktop;
+ const ipcRenderer={
+  on(channel,listener){channels.set(channel,listener);},
+  removeListener(channel,listener){assert.equal(channels.get(channel),listener);channels.delete(channel);},
+  async invoke(channel,input){
+   assert.equal(channel,'gaon-client:hometax');
+   assert.deepEqual({...input},{registration,month,attempt});
+   const progress=channels.get('gaon-client:hometax-progress');
+   progress(null,{attempt:'different-attempt',stage:'card',business:registration});
+   progress(null,{attempt,stage:'card',business:registration,...expected,transaction:'TEST private detail'});
+   return {registration};
+  }
+ };
+ const contextBridge={exposeInMainWorld(name,value){if(name==='gaonDesktop')desktop=value;}};
+ const source=readFileSync(new URL('../desktop-client-preload.cjs',import.meta.url),'utf8');
+ runInNewContext(source,{require(name){assert.equal(name,'electron');return {contextBridge,ipcRenderer};}});
+ const collected=await desktop.homeTax(registration,month,attempt,(stage,business,metadata)=>events.push({stage,business,metadata:{...metadata}}));
+ assert.equal(collected.registration,registration);
+ assert.deepEqual(events,[{stage:'card',business:registration,metadata:expected}]);
+ assert.equal(channels.size,0);
 });
