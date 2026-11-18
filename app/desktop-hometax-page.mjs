@@ -123,6 +123,13 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
        for(const node of [target,...addedNodes]){
          const el=node.nodeType===1?node:node.parentElement;
          if(!el)continue;
+         // An empty WebSquare result keeps the tbody unchanged and updates only
+         // the official total counter. That response must also mark its grid fresh.
+         const counter=el.closest('#mf_txppWframe_txtTotal');
+         if(counter){
+           const grid=document.getElementById(card?'mf_txppWframe_grdCshpt_body_table':'mf_txppWframe_resultGrid_body_table');
+           if(grid){state.tables.add(grid);state.emptySince.delete(grid);state.changed=true;}
+         }
          const table=el.closest('tbody')?.closest('table');
          const touched=table?[table]:el.matches('table')?[el]:node!==target?[...el.querySelectorAll('table:has(tbody)')]:[];
          for(const t of touched){state.tables.add(t);state.emptySince.delete(t);state.changed=true;}
