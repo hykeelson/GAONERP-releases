@@ -1,5 +1,5 @@
 import {homeTaxDailyImport,homeTaxProfileStore} from './desktop-hometax-session.mjs';
-import {openHomeTax} from './desktop-hometax.mjs';
+import {cardCollectionTrace,openHomeTax} from './desktop-hometax.mjs';
 import {desktopCloudOrigin,createDesktopCredentialStore,createDesktopCloudSession,desktopCloudReply} from './desktop-cloud-session.mjs';
 import {app,BrowserWindow,Menu,Tray,dialog,ipcMain,shell,session,Notification,safeStorage} from 'electron';
 import {readFile,access,writeFile} from 'node:fs/promises';
@@ -74,10 +74,17 @@ async function taxAccess(){
 function startTaxDaily(){
  taxDaily=homeTaxDailyImport({
   file:path.join(app.getPath('userData'),'hometax-daily.json'),access:taxAccess,
-  collect:({org,actor},registration,month)=>openHomeTax({BrowserWindow,session,parent:window,registration,month,profile:taxProfiles.acquire(org,actor),background:true}),
-  async commit({actor,org},month,data){
-   const query=new URLSearchParams({hometax:'cards',business:data.registration,month});
-   const reply=await cloud.request({path:'/api/gaon/vat?'+query,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actor,org,...data})});
+  async collect({org,actor},registration,month){
+   const trace=cardCollectionTrace({request:cloud.request,business:registration,month,clientVersion:app.getVersion(),platform:process.platform});
+   try{
+    const data=await openHomeTax({BrowserWindow,session,parent:window,registration,month,
+     profile:taxProfiles.acquire(org,actor),background:true,onStage:trace.onStage,onDiagnostic:trace.onDiagnostic});
+    return {...data,attempt:trace.attempt};
+   }catch(error){trace.fail(error);throw error;}
+  },
+  async commit({actor,org},month,{registration,groups,attempt}){
+   const query=new URLSearchParams({hometax:'cards',business:registration,month,attempt});
+   const reply=await cloud.request({path:'/api/gaon/vat?'+query,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actor,org,registration,groups})});
    if(!reply.ok)throw Object.assign(Error('홈택스 자료 저장을 확인하세요.'),{code:reply.status===403?'HT_PERMISSION':reply.status===409?'HT_CONFLICT':''});
    return reply.json();
   },

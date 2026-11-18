@@ -87,6 +87,35 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
  await waitFor(async()=>(await selected())===business,'수집 중 사업장이 달라졌습니다.');
  return {registration:business,groups:result};
 }
+// Use the same attempt ID for the tray's read progress and the server's save result.
+export function cardCollectionTrace({request,business,month,clientVersion,platform}) {
+ const attempt=randomUUID();
+ const endpoint='/api/gaon/vat?'+new URLSearchParams({hometax:'trace',month});
+ let stage='automatic',seq=0;
+ function report(next,diagnostic={},reason){
+   stage=next;
+   const {queryMode,resultMonth,dateBasis,approvalMonth,purchaseMonth}=diagnostic;
+   const body=JSON.stringify({attempt,seq:++seq,stage,business,clientVersion,platform,
+     queryMode,resultMonth,dateBasis,approvalMonth,purchaseMonth,reason});
+   // Diagnostics must never hold up the tax portal or a ledger save.
+   void Promise.resolve().then(()=>request({path:endpoint,method:'POST',headers:{'Content-Type':'application/json'},body})).catch(()=>{});
+ }
+ report(stage);
+ return {
+   attempt,
+   onStage:next=>report(next),
+   onDiagnostic:(next,diagnostic)=>report(next,diagnostic),
+   fail(error){
+     const code={HT_AUTH:'auth',HT_BUSINESS:'business',HT_PERMISSION:'permission',HT_BUSY:'busy',HT_MONTH_UNAVAILABLE:'month_unavailable'}[error?.code];
+     const message=error?.message||'';
+     const reason=code||[
+       [/선택한 달과 다른 날짜/,'result_month_mismatch'], [/조회 월이나 매입·매출 선택/,'period_controls'],
+       [/페이지/,'pagination'], [/건수/,'total'], [/창이 닫혔/,'closed']
+     ].find(([pattern])=>pattern.test(message))?.[1]||'other';
+     report(stage,{},reason);
+   }
+ };
+}
 let busy=false;
 export async function openHomeTax({BrowserWindow,session,parent,registration,month,onStage,onDiagnostic,onBusiness,guideCardMonth,profile,background=false,cardOnly=background}){
  if(busy)throw Object.assign(Error('홈택스 가져오기가 진행 중입니다.'),{code:'HT_BUSY'});

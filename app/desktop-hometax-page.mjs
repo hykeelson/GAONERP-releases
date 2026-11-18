@@ -76,8 +76,11 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    const years=sels.filter(e=>/년|연도/.test(labels(e))&&Array.from(e.options).some(o=>compact(o.textContent)===y+'년'||o.value===y));
    const months=sels.filter(e=>/월/.test(labels(e))&&Array.from(e.options).some(o=>/^0?1월?$/.test(compact(o.textContent))));
    const monthInputs=all('input').filter(e=>e.type==='month'||(e.type==='text'&&/조회년월|조회연월|조회월|거래년월|시작년월|종료년월/.test(labels(e))));
-   const yearMonthOption=(o)=>[o.textContent,o.value].some(t=>/^20\d{4}$/.test(t.replace(/\D/g,'')));
-   const combined=sels.filter(e=>/년월|연월|조회기간/.test(labels(e))&&Array.from(e.options).some(yearMonthOption));
+   const yearMonth=text=>{
+     const match=/^(20\d{2})(?:년|[.\/-])?(0?[1-9]|1[0-2])월?$/.exec(compact(text));
+     return match?match[1]+match[2].padStart(2,'0'):'';
+   };
+   const combined=sels.filter(e=>/년월|연월|조회기간/.test(labels(e))&&Array.from(e.options).some(o=>yearMonth(o.textContent)||yearMonth(o.value)));
    const setChoices=(controls,matches)=>{
      for(const el of controls){
        const option=Array.from(el.options).find(o=>matches(compact(o.textContent),o.value));
@@ -90,7 +93,9 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
    };
    const queryMode=combined.length?'combined':years.length&&months.length?'select':monthInputs.length?'month_input':'date_range';
    if(combined.length){
-     const pending=setChoices(combined,(t,v)=>[t,v].some(k=>k.replace(/\D/g,'')===y+m));
+     // WebSquare can give an option an internal value that looks like another month.
+     // Treat the full visible year/month as authoritative when it is present.
+     const pending=setChoices(combined,(text,value)=>(yearMonth(text)||yearMonth(value))===y+m);
      if(pending)return pending;
    }else if(years.length&&months.length){
      // Some select values are internal indices. An explicit calendar label takes precedence.
@@ -172,9 +177,11 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
  };
  const liveGrid=document.getElementById(card?'mf_txppWframe_grdCshpt_body_table':'mf_txppWframe_resultGrid_body_table');
  const tables=visible(liveGrid)?[liveGrid]:all('table');
+ const header=e=>compact(e.innerText||e.textContent).replace(/\(종사업장번호\)$/,'')
+   .replace(/^(공급가액|세액|부가세|부가가치세|합계금액|합계|총금액|사용금액)\(원\)$/,'$1');
  for(const table of tables){
-   let headers=Array.from(table.querySelectorAll('thead tr:last-child th')).map(e=>compact(e.innerText||e.textContent).replace(/\(종사업장번호\)$/,''));
-   if(!headers.length)headers=Array.from(table.querySelectorAll('tr:first-child th')).map(e=>compact(e.textContent));
+   let headers=Array.from(table.querySelectorAll('thead tr:last-child th'),header);
+   if(!headers.length)headers=Array.from(table.querySelectorAll('tr:first-child th'),header);
    if(!(card?headers.some(h=>h==='승인일자'||h==='거래일자'):headers.includes('승인번호')))continue;
    const state=globalThis[Symbol.for('gaon.hometax.result')];
    if(!state.tables.has(table)||table.closest('[aria-busy="true"]')||all('[role="progressbar"],.w2modal_progress').length)continue;

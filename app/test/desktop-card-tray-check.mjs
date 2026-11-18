@@ -25,7 +25,7 @@ const business='0000000000',identity={actor:'test-employee',org:'test-org'};
 const file=join(dir,'hometax-daily.json');
 const stub=homeTaxDailyImport({file});stub.manual(identity,business);stub.enable(identity,business);
 let db,main,shown=0,reads=0;
-const results=[];
+const results=[],traces=new Map();
 let additionalCard=false;
 // Let Electron finish loading its ES module entry point before waiting for ready.
 app.whenReady().then(async()=>{
@@ -51,9 +51,22 @@ app.whenReady().then(async()=>{
    if(!req.url.startsWith(desktopCloudAPI+'/api/gaon/'))return new Response(null,{status:404});
    if(u.pathname.endsWith('/auth/status'))return Response.json(req.headers.has('Authorization')?{signedIn:true,role:'admin',actor:{id:identity.actor}}:{signedIn:false,googleEnabled:true});
    if(u.pathname.endsWith('/auth/refresh'))return Response.json({accessToken:'synthetic-access',refreshToken:'synthetic-refresh',expiresAt:Date.now()+3*86400000});
-   if(u.searchParams.get('hometax')==='access')return Response.json(identity);
-   if(u.searchParams.get('hometax')!=='cards')return new Response(null,{status:404});
-   const data=await req.json(),month=u.searchParams.get('month');
+   const mode=u.searchParams.get('hometax'),month=u.searchParams.get('month');
+   if(mode==='access')return Response.json(identity);
+   if(mode==='trace'){
+     const trace=await req.json();
+     assert.match(trace.attempt,/^[a-f0-9-]{36}$/);
+     assert.equal(trace.business,business);
+     assert.equal(trace.clientVersion,app.getVersion());
+     assert.equal(trace.platform,process.platform);
+     assert.deepEqual(Object.keys(trace).filter(k=>!['attempt','seq','stage','business','clientVersion','platform','queryMode','resultMonth','dateBasis','approvalMonth','purchaseMonth','reason'].includes(k)),[]);
+     const stages=traces.get(trace.attempt)||[];
+     traces.set(trace.attempt,[...stages,{...trace,month}]);
+     return Response.json({ok:true});
+   }
+   if(mode!=='cards')return new Response(null,{status:404});
+   const data=await req.json(),attempt=u.searchParams.get('attempt');
+   assert.match(attempt,/^[a-f0-9-]{36}$/);
    console.log('Synthetic card submission',month,data.groups.card.length);
    assert.ok(['2026-09','2026-10'].includes(month));assert.equal(data.org,identity.org);assert.equal(data.actor,identity.actor);
    assert.deepEqual(Object.keys(data.groups),['card']);assert.equal(data.groups.card.length,additionalCard&&month==='2026-10'?3:2);
@@ -66,7 +79,7 @@ app.whenReady().then(async()=>{
      occurrences.set(value,ordinal);
      added+=Number(db.prepare('insert or ignore into cards values(?,?)').run(month,value+'#'+ordinal).changes);
    }
-   const result={added,duplicate:data.groups.card.length-added};results.push({month,...result});return Response.json(result);
+   const result={added,duplicate:data.groups.card.length-added};results.push({month,attempt,...result});return Response.json(result);
  });
  app.on('browser-window-created',(_event,win)=>{
    if(!main)main=win;
@@ -100,8 +113,15 @@ app.whenReady().then(async()=>{
  assert.deepEqual(results.map(row=>[row.month,row.added,row.duplicate]),[
    ['2026-09',2,0],['2026-10',2,0],['2026-09',0,2],['2026-10',1,2],['2026-09',0,2],['2026-10',0,3]
  ]);
+ const attempts=new Set(results.map(row=>row.attempt));
+ assert.equal(attempts.size,results.length);
+ await until(()=>results.every(({month,attempt})=>{
+   const stages=traces.get(attempt)||[];
+   return stages.some(trace=>trace.stage==='automatic'&&trace.seq===1&&trace.month===month)
+     &&stages.some(trace=>trace.stage==='card'&&trace.resultMonth===month&&trace.purchaseMonth===month&&trace.approvalMonth!==month&&trace.dateBasis==='purchase');
+ }),10000);
  assert.equal(shown,0);assert.ok(reads>=3);
- console.log(JSON.stringify({platform:process.platform,trayHidden:!main.isVisible(),authenticationWindows:shown,first:results[1],late:results[3],recheck:results[5],stored:current.length+previous.length}));
+ console.log(JSON.stringify({platform:process.platform,trayHidden:!main.isVisible(),authenticationWindows:shown,tracedAttempts:attempts.size,first:results[1],late:results[3],recheck:results[5],stored:current.length+previous.length}));
  db.close();app.exit(0);
  }catch(e){console.error(e.stack);app.exit(1);}finally{clearTimeout(watchdog);}
 });
