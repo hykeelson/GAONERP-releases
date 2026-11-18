@@ -128,16 +128,17 @@ function createWindow(){
 function setupSender(event){if(event.sender!==window?.webContents||event.senderFrame?.url!==setupURL)throw Error('허용되지 않은 화면입니다.');}
 function configureIPC(){
  const cloudSender=event=>{let url;try{url=new URL(event.senderFrame?.url);}catch{}if(event.sender!==window?.webContents||event.senderFrame!==window.webContents.mainFrame||serverOrigin!==desktopCloudOrigin||url?.origin!==desktopCloudOrigin||url.pathname!=='/erp/home.html')throw Error('허용되지 않은 업무 화면입니다.');};
+ ipcMain.handle('gaon-client:info',event=>{cloudSender(event);return {clientVersion:app.getVersion(),platform:process.platform};});
  ipcMain.handle('gaon-client:hometax',async(event,{registration,month,attempt})=>{
   cloudSender(event);
-  const onStage=(stage,business)=>{
+  const onStage=(stage,business,diagnostic={})=>{
    if(typeof attempt==='string'&&/^[a-f0-9-]{36}$/i.test(attempt)){
-    try{cloudSender(event);event.senderFrame.send('gaon-client:hometax-progress',{attempt,stage,business});}catch{/* The initiating view closed or navigated. */}
+    try{cloudSender(event);event.senderFrame.send('gaon-client:hometax-progress',{attempt,stage,business,clientVersion:app.getVersion(),platform:process.platform,...diagnostic});}catch{/* The initiating view closed or navigated. */}
    }
   };
   onStage('access');
   const {actor,org}=await taxAccess();
-  const collected=await openHomeTax({BrowserWindow,session,parent:window,registration,month,guideCardMonth,onStage,onBusiness:n=>onStage('businessConfirmed',n),profile:taxProfiles.acquire(org,actor)});
+  const collected=await openHomeTax({BrowserWindow,session,parent:window,registration,month,guideCardMonth,onStage,onDiagnostic:(stage,info)=>onStage(stage,undefined,info),onBusiness:n=>onStage('businessConfirmed',n),profile:taxProfiles.acquire(org,actor)});
   onStage('verifyAccess');cloudSender(event);const current=await taxAccess();if(actor!==current.actor||org!==current.org)throw Error('로그인한 직원이 변경됐습니다.');
   taxDaily?.manual(current,collected.registration);
   return {actor,...collected};

@@ -11,7 +11,7 @@ async function waitFor(probe,error,timeout=16000,interval=350){
  do{const result=await probe();if(result)return result;await pause(interval);}while(Date.now()<end);
  throw Error(typeof error==='function'?error():error);
 }
-export async function collectPortal({visit,step,registration,month,cardOnly=false,onCardSearch,onStage=()=>{},onBusiness=()=>{},onChooseBusiness=()=>{}}){
+export async function collectPortal({visit,step,registration,month,cardOnly=false,onCardSearch,onDiagnostic=()=>{},onStage=()=>{},onBusiness=()=>{},onChooseBusiness=()=>{}}){
  if((registration!==''&&!/^\d{10}$/.test(registration))||!/^20\d\d-(0[1-9]|1[0-2])$/.test(month))throw Error('사업자번호와 조회 월을 확인하세요.');
  await visit();await onStage('login');await waitFor(async()=> (await step('login')).some(r=>r.ready),'홈택스 로그인 상태를 확인할 수 없습니다.',Infinity,1200);
  const selected=async()=>{const ids=new Set((await step('login')).map(r=>r.business).filter(Boolean));return ids.size===1?[...ids][0]:'';};
@@ -42,10 +42,11 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
    },'조회 월이나 매입·매출 선택 상태를 확인할 수 없습니다.');
    const rows=[];let expected;
    for(let page=1;page<=1000;page++){
-     let issue='',mismatched=false;
+     let issue='',mismatched=false,mismatchKey='';
      const probe=async()=>{
        const replies=await step('rows',kind,page);
-       if(replies.some(r=>r.outsideMonth)){mismatched=true;issue='선택한 달과 다른 날짜가 포함되어 있습니다.';return false;}
+       const mismatch=replies.find(r=>r.outsideMonth);
+       if(mismatch){const key=mismatch.queryMode+'|'+mismatch.resultMonth;if(key!==mismatchKey){await onDiagnostic(kind,{queryMode:mismatch.queryMode,resultMonth:mismatch.resultMonth});mismatchKey=key;}mismatched=true;issue='선택한 달과 다른 날짜가 포함되어 있습니다.';return false;}
        issue=replies.find(r=>r.problem)?.problem||issue;
        return replies.find(r=>r.ready);
      };
@@ -79,7 +80,7 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
  return {registration:business,groups:result};
 }
 let busy=false;
-export async function openHomeTax({BrowserWindow,session,parent,registration,month,onStage,onBusiness,guideCardMonth,profile,background=false,cardOnly=background}){
+export async function openHomeTax({BrowserWindow,session,parent,registration,month,onStage,onDiagnostic,onBusiness,guideCardMonth,profile,background=false,cardOnly=background}){
  if(busy)throw Object.assign(Error('홈택스 가져오기가 진행 중입니다.'),{code:'HT_BUSY'});
  if(background&&!profile)throw Error('자동 수집에는 등록된 사업장이 필요합니다.');
  busy=true;let win,isolated,deadline;
@@ -151,7 +152,7 @@ export async function openHomeTax({BrowserWindow,session,parent,registration,mon
    };
    let confirmedBusiness=registration;
    for(let attempt=0;;attempt++){
-     try{return await collectPortal({visit:()=>win.loadURL(home),step,registration:confirmedBusiness,month,cardOnly,onStage,
+     try{return await collectPortal({visit:()=>win.loadURL(home),step,registration:confirmedBusiness,month,cardOnly,onStage,onDiagnostic,
        onCardSearch:!background&&guideCardMonth?async target=>{win.show();win.focus();await guideCardMonth(win,target);}:undefined,
        onChooseBusiness:()=>{if(background)throw Object.assign(Error('홈택스 사업장을 확인하세요.'),{code:'HT_BUSINESS'});win.show();win.focus();},onBusiness:n=>{confirmedBusiness=n;onBusiness?.(n);if(profile)win.hide();}});}
      catch(error){if(!error.reauth||attempt>=2)throw error;lastReady=false;openedForAuth=false;loginChecks=0;entryLinks.length=0;entryStarted=0;}

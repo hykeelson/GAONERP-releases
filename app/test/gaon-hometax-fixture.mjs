@@ -1,11 +1,14 @@
 // Synthetic official-menu and ledger controls shared by the two isolated browser tests.
-export function portal({wrongMonth,additionalCard=false}){
+export function portal({wrongMonth,additionalCard=false,delayedMonthBinding=false}){
  const menus=document.getElementById('menus'),html=document.getElementById('body');
  menus.innerHTML='<a id="menuAtag_4608020100">매입세액 공제 확인/변경</a><a id="menuAtag_4609050300">월/분기별 목록조회</a>';
  for(const [idx,a] of Array.from(menus.children).entries())a.onclick=()=>{
   html.innerHTML='<h2>'+a.textContent+'</h2><label>조회 월<input type="month"></label><label><input type="radio" name="dir">매입</label><label><input type="radio" name="dir">매출</label><button>조회하기</button><div id="grid"></div>';
+  let boundMonth='2026-07';
+  const monthControl=html.querySelector('[type=month]');
+  monthControl.onchange=()=>setTimeout(()=>{boundMonth=monthControl.value;},20);
   html.querySelector('button').onclick=()=>{
-   const month=html.querySelector('[type=month]').value;
+   const month=delayedMonthBinding?boundMonth:monthControl.value;
    if(!['2026-09','2026-10'].includes(month))throw Error('기간 오류');
    const buy=html.querySelector('input[type=radio]').checked;
    const cols=idx?['작성일자','승인번호','상호','공급가액','세액','합계금액']:['승인일자','가맹점명','카드사','카드번호','공급가액','세액','합계'];

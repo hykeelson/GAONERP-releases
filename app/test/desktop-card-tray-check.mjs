@@ -38,7 +38,7 @@ app.whenReady().then(async()=>{
  profile.session.protocol.handle('https',req=>{
    assert.equal(new URL(req.url).hostname,'www.hometax.go.kr');
    reads++;console.log('Synthetic portal opened',reads,'late transaction',additionalCard);
-   const html='<header title="사업자">000-00-00000 <button>로그아웃</button></header><div id="menus"></div><div id="body"></div><script>('+portal.toString()+')('+JSON.stringify({wrongMonth:false,additionalCard})+')</script>';
+   const html='<header title="사업자">000-00-00000 <button>로그아웃</button></header><div id="menus"></div><div id="body"></div><script>('+portal.toString()+')('+JSON.stringify({wrongMonth:false,additionalCard,delayedMonthBinding:true})+')</script>';
    return new Response(html,{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store'}});
  });
  const cloud=session.fromPartition('persist:gaon-erp-client');
