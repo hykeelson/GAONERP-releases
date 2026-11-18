@@ -189,13 +189,18 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
      headers.forEach((h,i)=>{
        if(!card&&/^공급(자|받는자)(사업자)?등록번호$/.test(h))side=h.startsWith('공급받는자')?'공급받는자':'공급자';
        const key=(!card&&side&&headers.filter(v=>/^상호/.test(v)).length>1&&/^상호(\(법인명\))?$/.test(h))?side+h:h;
-       if(!/^(승인일자|거래일자|작성일자?|승인번호|거래내역일련번호|카드사명?|카드번호|가맹점명|가맹점사업자(등록)?번호|(공급자|공급받는자)?상호(\(법인명\))?|(공급자|공급받는자)(사업자)?등록번호|공급가액|세액|부가세|부가가치세|합계금액|합계|총금액|사용금액)$/.test(key))return;
+       if(!/^(승인일자|거래일자|매입일자|작성일자?|승인번호|거래내역일련번호|카드사명?|카드번호|가맹점명|가맹점사업자(등록)?번호|(공급자|공급받는자)?상호(\(법인명\))?|(공급자|공급받는자)(사업자)?등록번호|공급가액|세액|부가세|부가가치세|합계금액|합계|총금액|사용금액)$/.test(key))return;
        const input=cells[i].querySelector(':scope > nobr');
-       const val=input?trim(Array.from(input.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent).join('')||input.innerText):trim(cells[i].innerText);record[key]=key==='카드번호'?val.replace(/[^0-9*]/g,'').slice(-4):val;
+       const val=input?trim(Array.from(input.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent).join('')||input.innerText):trim(key==='매입일자'?cells[i].textContent:cells[i].innerText);record[key]=key==='카드번호'?val.replace(/[^0-9*]/g,'').slice(-4):val;
      });
      const day=String(record[card?'승인일자':'작성일자']||record[card?'거래일자':'작성일']||'').replace(/[.\s/-]/g,'');
-     if(/^\d{8}$/.test(day)&&day.slice(0,6)!==month.replace('-',''))return {outsideMonth:true,queryMode:state.queryMode,resultMonth:day.slice(0,4)+'-'+day.slice(4,6)};
-     if(!/^\d{8}$/.test(day)||day.slice(0,6)!==month.replace('-','')||!(/^-?[\d,]+$/.test(record['합계금액']||record['합계']||record['사용금액']||record['총금액']||'')))return {};
+     const purchaseDay=card?String(record['매입일자']||'').replace(/[.\s/-]/g,''):'';
+     // Card approval and acquisition dates are distinct NTS fields. A July
+     // approval acquired in August must keep its approval date, not fail August.
+     const periodDay=purchaseDay||day;
+     const monthOf=d=>/^20\d{6}$/.test(d)?d.slice(0,4)+'-'+d.slice(4,6):undefined;
+     if(monthOf(periodDay)&&monthOf(periodDay)!==month)return {outsideMonth:true,queryMode:state.queryMode,resultMonth:monthOf(periodDay),dateBasis:card?(purchaseDay?'purchase':'approval'):'written',...(card?{approvalMonth:monthOf(day),...(purchaseDay?{purchaseMonth:monthOf(purchaseDay)}:{})}:{})};
+     if(!/^\d{8}$/.test(day)||!/^\d{8}$/.test(periodDay)||monthOf(periodDay)!==month||!(/^-?[\d,]+$/.test(record['합계금액']||record['합계']||record['사용금액']||record['총금액']||'')))return {};
      records.push(record);
    }
    const counts=readCounts(table);
@@ -218,7 +223,7 @@ export function homeTaxStep({op,kind,month,registration,page=1}) {
      if(!state.emptySince.has(table))state.emptySince.set(table,now);
      if(now-state.emptySince.get(table)<2000)return {};
    }
-   return {ready:true,records,total};
+   return {ready:true,records,total,queryMode:resultState.queryMode};
  }
  return {};
 }

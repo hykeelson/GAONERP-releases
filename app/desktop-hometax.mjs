@@ -40,13 +40,13 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
      if(replies.some(r=>r.monthUnavailable))throw Object.assign(Error('홈택스가 해당 조회 월을 아직 제공하지 않습니다.'),{code:'HT_MONTH_UNAVAILABLE'});
      return false;
    },'조회 월이나 매입·매출 선택 상태를 확인할 수 없습니다.');
-   const rows=[];let expected;
+   const rows=[];let expected,queryMode;
    for(let page=1;page<=1000;page++){
      let issue='',mismatched=false,mismatchKey='';
      const probe=async()=>{
        const replies=await step('rows',kind,page);
        const mismatch=replies.find(r=>r.outsideMonth);
-       if(mismatch){const key=mismatch.queryMode+'|'+mismatch.resultMonth;if(key!==mismatchKey){await onDiagnostic(kind,{queryMode:mismatch.queryMode,resultMonth:mismatch.resultMonth});mismatchKey=key;}mismatched=true;issue='선택한 달과 다른 날짜가 포함되어 있습니다.';return false;}
+       if(mismatch){const key=[mismatch.queryMode,mismatch.resultMonth,mismatch.dateBasis,mismatch.approvalMonth,mismatch.purchaseMonth].join('|');if(key!==mismatchKey){await onDiagnostic(kind,{queryMode:mismatch.queryMode,resultMonth:mismatch.resultMonth,...Object.fromEntries(['dateBasis','approvalMonth','purchaseMonth'].filter(k=>mismatch[k]).map(k=>[k,mismatch[k]]))});mismatchKey=key;}mismatched=true;issue='선택한 달과 다른 날짜가 포함되어 있습니다.';return false;}
        issue=replies.find(r=>r.problem)?.problem||issue;
        return replies.find(r=>r.ready);
      };
@@ -64,6 +64,7 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
        },failure,180000);
        if(await selected()!==business)throw Error('수집 중 사업장이 달라졌습니다.');
      }
+     queryMode=read.queryMode;
      expected??=read.total;
      if(expected!==read.total||expected>5000||rows.length+read.records.length>expected)throw Error('조회 중 건수가 달라졌거나 한도(5,000건)를 넘었습니다.');
      rows.push(...read.records);
@@ -71,6 +72,13 @@ export async function collectPortal({visit,step,registration,month,cardOnly=fals
      if(!read.records.length||!(await step('next',kind,page+1)).some(r=>r.ready))throw Error('전체 페이지를 가져오지 못했습니다.');
    }
    if(rows.length!==expected)throw Error('홈택스 전체 건수와 수집 건수가 다릅니다.');
+   // Emit one month-only summary even on success, preferring a cross-month card.
+   const monthOf=value=>{const d=String(value||'').replace(/[.\s/-]/g,'');return /^20\d{6}$/.test(d)?d.slice(0,4)+'-'+d.slice(4,6):undefined;};
+   const dated=rows.find(r=>kind==='card'&&r['매입일자']&&monthOf(r['승인일자']||r['거래일자'])!==monthOf(r['매입일자']))||rows[0];
+   if(dated){
+     const approvalMonth=monthOf(dated['승인일자']||dated['거래일자']),purchaseMonth=monthOf(dated['매입일자']);
+     await onDiagnostic(kind,{...(queryMode?{queryMode}:{}),resultMonth:month,dateBasis:kind==='card'?(purchaseMonth?'purchase':'approval'):'written',...(kind==='card'?{approvalMonth,...(purchaseMonth?{purchaseMonth}:{})}:{})});
+   }
    result[kind]=rows;
  }
  // The homepage and invoice search may omit the selected business. Recheck it
