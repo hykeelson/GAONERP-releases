@@ -47,7 +47,7 @@ const cloudFixture=()=>{
  return {store,calls,fetcher,get token(){return token;},get refreshes(){return refreshes;},get exchanges(){return exchanges;},seed:v=>token=v,rejectStaff:()=>staffAllowed=false,reply:(status,body)=>{businessStatus=status;businessBody=body;}};
 };
 test('desktop OAuth uses PKCE/system-browser callback; renderer receives no session credential',async()=>{
- const f=cloudFixture(),auth=createDesktopCloudSession(f);const url=new URL(await auth.begin());assert.equal(url.searchParams.get('redirect_to'),desktopOAuthCallback);assert.equal(url.searchParams.get('code_challenge_method'),'s256');assert(!url.searchParams.has('code_verifier'));
+ const f=cloudFixture(),auth=createDesktopCloudSession(f);const url=new URL(await auth.begin());assert.equal(url.searchParams.get('redirect_to'),desktopOAuthCallback);assert.equal(url.searchParams.get('code_challenge_method'),'s256');assert.equal(url.searchParams.get('prompt'),'select_account');assert(!url.searchParams.has('code_verifier'));
  const status=await auth.complete(desktopOAuthCallback+'?code=FAKE_CODE');assert.equal(status.actor.id,'fake-employee');assert(!JSON.stringify(status).includes('FAKE_ACCESS_ONLY'));assert.equal(f.token,'FAKE_REFRESH_ONLY');await assert.rejects(auth.complete(desktopOAuthCallback+'?code=FAKE_CODE'));assert.equal(f.exchanges,1);
 });
 test('desktop login refuses unregistered staff before persisting refresh credentials',async()=>{
